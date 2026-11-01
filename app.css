@@ -539,3 +539,18 @@ main#list { padding-top: 8px; }
 .docs-empty { text-align: center; color: var(--muted); padding: 56px 20px; }
 .docs-empty p { margin: 8px 0 0; }
 .docs-empty .sub { font-size: .9em; }
+
+/* ===== Lettore PDF ===== */
+.pdf-body { padding: 0; overflow: auto; touch-action: pan-x pan-y; background: #2a2a2a; position: relative; }
+.pdf-pages { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; width: max-content; min-width: 100%; position: relative; padding: 8px 0 80px; box-sizing: border-box; }
+.pdf-page { position: relative; background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .45); flex: none; margin: 0 auto; }
+.pdf-page canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.pdf-hl { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.pdf-hl i { position: absolute; background: rgba(255, 235, 59, .45); border-radius: 2px; transform-origin: 0 100%; }
+.pdf-hl i.cur { background: rgba(255, 152, 0, .6); outline: 2px solid rgba(255, 152, 0, .9); }
+.pdf-pill { position: absolute; left: 50%; bottom: calc(18px + var(--sab)); transform: translateX(-50%); z-index: 3; padding: 8px 16px; border-radius: 999px; background: rgba(30, 30, 30, .88); color: #fff; font-weight: 650; font-size: .9em; border: 1px solid var(--line); }
+.pdf-search { display: none; align-items: center; gap: 4px; padding: 4px 8px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.pdf-search.on { display: flex; }
+.pdf-search input { flex: 1; min-width: 0; height: 40px; border: 0; background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 0 14px; outline: none; }
+.pdf-count { flex: none; min-width: 3.2em; text-align: center; color: var(--muted); font-size: .85em; }
+.pdf-status { text-align: center; color: var(--muted); padding: 40px 20px; margin: 0; }

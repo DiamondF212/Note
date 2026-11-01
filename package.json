@@ -5,8 +5,8 @@
   "description": "App personale per note offline",
   "scripts": {
     "build": "node scripts/build-www.js",
-    "test:unit": "node tests/tools.unit.test.js && node tests/docs.unit.test.js",
-    "test:e2e": "node tests/tools.e2e.test.js && node tests/docs.e2e.test.js",
+    "test:unit": "node tests/tools.unit.test.js && node tests/docs.unit.test.js && node tests/pdf.unit.test.js",
+    "test:e2e": "node tests/tools.e2e.test.js && node tests/docs.e2e.test.js && node tests/pdf.e2e.test.js",
     "android:add": "cap add android",
     "android:sync": "npm run build && cap sync android",
     "android:open": "cap open android"
