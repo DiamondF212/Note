@@ -1,4 +1,6 @@
-/* Archivio locale su IndexedDB: funziona offline e resta sul dispositivo. */
+/* Archivio locale su IndexedDB: funziona offline e resta sul dispositivo.
+   Versione 2: aggiunge l'archivio "docs" per i documenti (PDF, Word, Excel).
+   L'aggiornamento è solo additivo: le note e le impostazioni esistenti non vengono toccate. */
 (function (N) {
   'use strict';
   let dbp = null;
@@ -6,14 +8,16 @@
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((resolve, reject) => {
-      const r = indexedDB.open('mie-note', 1);
+      const r = indexedDB.open('mie-note', 2);
       r.onupgradeneeded = () => {
         const d = r.result;
         if (!d.objectStoreNames.contains('notes')) d.createObjectStore('notes', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'k' });
+        if (!d.objectStoreNames.contains('docs')) d.createObjectStore('docs', { keyPath: 'id' });
       };
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
+      r.onblocked = () => reject(new Error('Archivio bloccato da un’altra scheda aperta: chiudila e riprova.'));
     });
     return dbp;
   }
@@ -45,6 +49,14 @@
       const r = await run('meta', 'readonly', (s) => s.get(k));
       return r ? r.v : undefined;
     },
-    setMeta: (k, v) => run('meta', 'readwrite', (s) => s.put({ k, v }))
+    setMeta: (k, v) => run('meta', 'readwrite', (s) => s.put({ k, v })),
+
+    /* Documenti: ogni record contiene anche il file intero (campo "data", un ArrayBuffer). */
+    docs: {
+      all: () => run('docs', 'readonly', (s) => s.getAll()),
+      get: (id) => run('docs', 'readonly', (s) => s.get(id)),
+      put: (d) => run('docs', 'readwrite', (s) => s.put(d)),
+      del: (id) => run('docs', 'readwrite', (s) => s.delete(id))
+    }
   };
 })((window.N = window.N || {}));

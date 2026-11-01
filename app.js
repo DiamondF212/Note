@@ -1121,6 +1121,23 @@
   }
   function openTools(tab, mode) { N.tools.init(toolsCtx()); N.tools.open(tab, mode); }
 
+  /* =============== documenti (PDF, Word, Excel) =============== */
+  function docsCtx() {
+    return {
+      h, I, ibtn, toast, openSheet, pushLayer, back, download, fmtDate, uid,
+      // crea una nota vera a partire dal testo di un documento
+      saveAsNote: (title, text) => {
+        const now = Date.now();
+        const n = normalize({ id: uid(), kind: 'text', title: String(title || '').slice(0, 80), body: text || '', created: now, updated: now });
+        S.notes.push(n);
+        persist(n);
+        if ($('#list')) renderAll();
+        return n;
+      }
+    };
+  }
+  function openDocs() { N.docs.init(docsCtx()); return N.docs.open(); }
+
   /* =============== menu laterale =============== */
   function openDrawer() {
     const scrim = h('div', { class: 'scrim' });
@@ -1139,6 +1156,7 @@
       item('notes', 'Panoramica personale', false, async () => { await back(); openDashboard(); }),
       item('calendar', 'Calendario', false, async () => { await back(); openCalendar(); }),
       item('tools', 'Strumenti', false, async () => { await back(); openTools(); }),
+      item('file', 'Documenti', false, async () => { await back(); openDocs(); }),
       item('edit', 'Nota di oggi', false, async () => { await back(); openToday(); })
     );
     dr.append(h('div', { class: 'sec' }, 'Cartelle'));
@@ -1626,6 +1644,10 @@
       if (quick === 'today') openToday(); else if (quick === 'text' || quick === 'list') createNote(quick, false);
     }
     N.tools.init(toolsCtx()); // riprende cronometro / conto alla rovescia rimasti attivi
+    if (new URLSearchParams(location.search).get('docs') !== null) {
+      history.replaceState(null, '', location.pathname);
+      openDocs();
+    }
     if (new URLSearchParams(location.search).get('tools') !== null) {
       const tq = new URLSearchParams(location.search).get('tools');
       history.replaceState(null, '', location.pathname);

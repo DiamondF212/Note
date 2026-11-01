@@ -521,3 +521,21 @@ main#list { padding-top: 8px; }
 .tools-baserow span { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; overflow-wrap: anywhere; }
 .tools-baserow:active { transform: scale(.98); }
 .tools-basebox .tools-num { text-transform: none; }
+
+/* ===== Documenti (PDF, Word, Excel) ===== */
+.docs-screen { position: fixed; inset: 0; z-index: 22; display: flex; flex-direction: column; background: var(--bg); color: var(--ink); animation: fade-in .2s ease both; }
+.ds-bar { display: flex; align-items: center; gap: 4px; padding: calc(var(--sat) + 8px) 10px 6px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.ds-title { margin: 0 0 0 4px; flex: 1; font-size: 1.3em; font-weight: 750; letter-spacing: -.03em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-actions { display: flex; align-items: center; gap: 2px; }
+.ds-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px calc(24px + var(--sab)); overscroll-behavior: contain; }
+.docs-seg { margin-bottom: 12px; }
+.docs-list { display: flex; flex-direction: column; gap: 8px; }
+.docrow { display: flex; align-items: center; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding-right: 4px; }
+.docmain { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 8px 12px 12px; text-align: left; color: var(--ink); }
+.dtype { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; font-weight: 800; }
+.dtxt { min-width: 0; display: flex; flex-direction: column; }
+.dtxt b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dtxt small { color: var(--muted); }
+.docs-empty { text-align: center; color: var(--muted); padding: 56px 20px; }
+.docs-empty p { margin: 8px 0 0; }
+.docs-empty .sub { font-size: .9em; }

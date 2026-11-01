@@ -14,7 +14,8 @@
     { "name": "Nuova nota", "url": "./?new=text" },
     { "name": "Nuova lista", "url": "./?new=list" },
     { "name": "Nota di oggi", "url": "./?new=today" },
-    { "name": "Strumenti", "url": "./?tools" }
+    { "name": "Strumenti", "url": "./?tools" },
+    { "name": "Documenti", "url": "./?docs" }
   ],
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },

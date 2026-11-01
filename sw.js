@@ -1,5 +1,5 @@
-const CACHE = 'le-mie-note-v5';
-const ASSETS = ['./', './index.html', './app.css', './app.js', './analysis.js', './audio.js', './drag_drop.js', './tools.js', './db.js', './crypto.js', './export.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
+const CACHE = 'le-mie-note-v6';
+const ASSETS = ['./', './index.html', './app.css', './app.js', './analysis.js', './audio.js', './drag_drop.js', './tools.js', './docs.js', './db.js', './crypto.js', './export.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 // Precache tollerante: se un file manca, l'installazione non fallisce.
 self.addEventListener('install', (event) => event.waitUntil(
