@@ -1,5 +1,7 @@
 name: Scarica librerie (vendor)
 
+# Scarica UNA VOLTA le librerie con versioni fissate e le salva in vendor/.
+# L'app non le scarica mai da internet: sono dentro l'APK.
 on:
   workflow_dispatch:
 
@@ -14,32 +16,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Scarica le librerie con versioni fisse
+      - name: Installa le librerie (versioni fisse)
         run: |
           mkdir -p /tmp/v && cd /tmp/v && npm init -y >/dev/null
-          npm install --no-audit --no-fund pdf-lib@1.17.1 @pdf-lib/fontkit@1.1.1 pdfjs-dist@3.11.174 mammoth@1.8.0 exceljs@4.4.0 docx@8.5.0
-          echo "== struttura ==" 
-          ls node_modules/pdfjs-dist/build | head -30
-          ls node_modules/pdf-lib/dist node_modules/@pdf-lib/fontkit/dist node_modules/mammoth node_modules/exceljs/dist node_modules/docx/build 2>&1 | head -60
-      - name: Copia in vendor/
+          npm install --save-exact pdfjs-dist@3.11.174 pdf-lib@1.17.1 @pdf-lib/fontkit@1.1.1 mammoth@1.8.0 exceljs@4.4.0
+      - name: Copia i file nel repository
         run: |
-          set -e
-          V=$GITHUB_WORKSPACE/vendor; N=/tmp/v/node_modules
-          rm -rf $V && mkdir -p $V/pdfjs $V/licenze
-          cp $N/pdf-lib/dist/pdf-lib.min.js $V/
-          cp $N/@pdf-lib/fontkit/dist/fontkit.umd.min.js $V/
-          cp $N/pdfjs-dist/build/pdf.min.js $N/pdfjs-dist/build/pdf.worker.min.js $V/pdfjs/
-          cp -r $N/pdfjs-dist/cmaps $V/pdfjs/cmaps
-          cp -r $N/pdfjs-dist/standard_fonts $V/pdfjs/standard_fonts
-          cp $N/mammoth/mammoth.browser.min.js $V/
-          cp $N/exceljs/dist/exceljs.min.js $V/
-          for p in pdf-lib @pdf-lib/fontkit pdfjs-dist mammoth exceljs docx; do n=$(echo $p | tr '/@' '__'); cp $N/$p/LICENSE* $V/licenze/$n.txt 2>/dev/null || true; done
-          (cd /tmp/v && npm ls --depth=0) > $V/VERSIONI.txt
-          du -sh $V; find $V -type f | head -80
+          rm -rf vendor && mkdir -p vendor/licenses
+          N=/tmp/v/node_modules
+          cp $N/pdfjs-dist/build/pdf.min.js vendor/pdf.min.js
+          cp $N/pdfjs-dist/build/pdf.worker.min.js vendor/pdf.worker.min.js
+          cp $N/pdf-lib/dist/pdf-lib.min.js vendor/pdf-lib.min.js
+          cp $N/@pdf-lib/fontkit/dist/fontkit.umd.min.js vendor/fontkit.umd.min.js
+          cp $N/mammoth/mammoth.browser.min.js vendor/mammoth.browser.min.js
+          cp $N/exceljs/dist/exceljs.min.js vendor/exceljs.min.js
+          for p in pdfjs-dist pdf-lib @pdf-lib/fontkit mammoth exceljs; do
+            n=$(echo $p | tr '/@' '__'); cp $N/$p/LICENSE* vendor/licenses/$n.txt 2>/dev/null || true
+          done
+          ls -la vendor
       - name: Salva nel repository
         run: |
           git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.email "actions@users.noreply.github.com"
           git add vendor
-          git commit -m "Aggiunge librerie in vendor/ (versioni fisse)" || echo "niente da salvare"
+          git diff --cached --quiet || git commit -m "Librerie in vendor/ (versioni fisse)"
           git push
