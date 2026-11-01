@@ -554,3 +554,16 @@ main#list { padding-top: 8px; }
 .pdf-search input { flex: 1; min-width: 0; height: 40px; border: 0; background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 0 14px; outline: none; }
 .pdf-count { flex: none; min-width: 3.2em; text-align: center; color: var(--muted); font-size: .85em; }
 .pdf-status { text-align: center; color: var(--muted); padding: 40px 20px; margin: 0; }
+
+/* ===== Lettore PDF: annotazioni ===== */
+.pdf-ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
+.pdf-body.inking .pdf-ink { pointer-events: auto; touch-action: none; cursor: crosshair; }
+.pdf-tools { display: none; align-items: center; gap: 6px; padding: 4px 8px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.pdf-tools.on { display: flex; }
+.pdf-tb { flex: none; color: var(--ink); }
+.pdf-tb.on, .pdf-hlbtn.on { background: var(--surface2); outline: 2px solid var(--accent); }
+.pdf-tb:disabled, .pdf-savebtn:disabled { opacity: .35; }
+.pdf-hlbtn { padding: 0 12px; height: 40px; border-radius: 999px; font-weight: 650; color: var(--ink); flex: none; }
+.pdf-col { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); }
+.pdf-col.on { border-color: var(--ink); transform: scale(1.15); }
+.pdf-savebtn { flex: none; margin-left: auto; padding: 0 16px; height: 38px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }

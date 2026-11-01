@@ -191,7 +191,86 @@ async function makeScan() { // pagina senza testo (come una scansione)
     eq(dl.suggestedFilename(), 'Lungo.pdf');
     ok(fs.readFileSync(await dl.path()).equals(PDF12), 'file diverso');
   });
-  await t('il tasto Indietro chiude il lettore', async () => { await closeViewer(); ok(await page.locator('.docs-screen').count() === 1); });
+  /* ---------- annotazioni ---------- */
+  const docSize = () => page.evaluate(() => N.docs._state.docs.find((d) => d.name === 'Lungo').size);
+  const pageBox = () => page.locator('.pdf-page[data-page="2"]').boundingBox();
+  const stroke = async (fx0, fy0, fx1, fy1) => {
+    const b = await pageBox(); const y0 = Math.max(b.y, 130);
+    await page.mouse.move(b.x + b.width * fx0, y0 + 40 + fy0 * 100);
+    await page.mouse.down();
+    for (let k = 1; k <= 8; k++) await page.mouse.move(b.x + b.width * (fx0 + (fx1 - fx0) * k / 8), y0 + 40 + (fy0 + (fy1 - fy0) * k / 8) * 100);
+    await page.mouse.up();
+  };
+  const inkCount = () => page.locator('.pdf-ink path').count();
+  const colorPixels = (test) => page.locator('.pdf-page canvas').evaluateAll((cs, src) => {
+    const f = new Function('r', 'g', 'b', 'return ' + src);
+    let n = 0;
+    for (const c of cs) { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 0; i < d.length; i += 4) if (f(d[i], d[i + 1], d[i + 2])) n++; }
+    return n;
+  }, test);
+
+  await t('annotazioni: il pulsante apre la barra e lo scorrimento resta libero quando è chiusa', async () => {
+    ok(!(await page.locator('.pdf-tools.on').count()), 'la barra doveva essere chiusa');
+    await page.click('[data-pdf-annot]'); await page.waitForSelector('.pdf-tools.on');
+    ok(await page.locator('.pdf-body.inking').count() === 1);
+    ok(await page.locator('[data-ink-save]').isDisabled(), 'Salva deve essere spento senza tratti');
+  });
+  await t('annotazioni: evidenziatore e penna disegnano tratti; «Annulla» li toglie uno alla volta', async () => {
+    await stroke(0.1, 0.1, 0.8, 0.1); eq(await inkCount(), 1);
+    await page.click('[data-ink-pen]'); await page.click('[data-ink-color="#e53935"]');
+    await stroke(0.1, 0.5, 0.8, 0.6); eq(await inkCount(), 2);
+    await page.click('[data-ink-undo]'); eq(await inkCount(), 1);
+    await page.click('[data-ink-undo]'); eq(await inkCount(), 0);
+    ok(await page.locator('[data-ink-undo]').isDisabled());
+    ok(await page.locator('[data-ink-save]').isDisabled());
+  });
+  await t('annotazioni: il tratto in corso sparisce se arriva un secondo dito (zoom)', async () => {
+    const b = await pageBox();
+    await page.evaluate(({ x, y }) => {
+      const svg = document.querySelector('.pdf-page[data-page="2"] .pdf-ink');
+      const ev = (type, id, dx) => svg.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: id, pointerType: 'touch', clientX: x + dx, clientY: y, isPrimary: id === 1 }));
+      ev('pointerdown', 1, 0); ev('pointermove', 1, 20); ev('pointerdown', 2, 60); ev('pointermove', 1, 40); ev('pointerup', 1, 40); ev('pointerup', 2, 60);
+    }, { x: b.x + 60, y: Math.max(b.y, 130) + 200 });
+    eq(await inkCount(), 0);
+  });
+  let sizeBefore;
+  await t('annotazioni: «Salva» scrive i tratti dentro il PDF e riapre il lettore sullo stesso punto', async () => {
+    await page.click('[data-ink-pen]'); await page.click('[data-ink-color="#e53935"]');
+    await stroke(0.1, 0.5, 0.8, 0.6);
+    await page.click('[data-ink-hl]'); await page.click('[data-ink-color="#ffeb3b"]');
+    await stroke(0.1, 0.1, 0.8, 0.1); eq(await inkCount(), 2);
+    sizeBefore = await docSize();
+    await page.click('[data-ink-save]');
+    await page.waitForFunction(() => /Annotazioni salvate/.test((document.querySelector('.toast') || {}).innerText || ''));
+    await page.waitForFunction(() => document.querySelectorAll('.pdf-body').length === 1 && document.querySelector('.pdf-pill'));
+    await page.waitForSelector('.pdf-page canvas');
+    await page.waitForFunction(() => document.querySelector('.pdf-pill').textContent === '2 / 12');
+    ok((await docSize()) > sizeBefore, 'il file non è cambiato');
+    eq(await inkCount(), 0, 'i tratti devono essere dentro il PDF, non sopra');
+  });
+  await t('annotazioni: nel PDF salvato si vedono davvero giallo (evidenziatore) e rosso (penna)', async () => {
+    await page.waitForFunction(() => document.querySelector('.pdf-page[data-page="2"] canvas'));
+    await page.waitForTimeout(500);
+    ok(await colorPixels('r>240&&g>235&&b>120&&b<200') > 200, 'nessun pixel giallo');
+    ok(await colorPixels('r>170&&g<110&&b<110') > 20, 'nessun pixel rosso');
+  });
+  await t('annotazioni: il PDF modificato resta un PDF valido con 12 pagine (esportazione)', async () => {
+    await page.click('button[aria-label="Altro"]');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.sheet [data-act="export"]')]);
+    const buf = fs.readFileSync(await dl.path());
+    ok(!buf.equals(PDF12));
+    const re = await PDFDocument.load(buf); eq(re.getPageCount(), 12);
+  });
+  await t('annotazioni: uscendo senza premere «Salva» i tratti vengono salvati comunque', async () => {
+    const before = await docSize();
+    await page.click('[data-pdf-annot]'); await page.waitForSelector('.pdf-tools.on');
+    await page.click('[data-ink-pen]'); await page.click('[data-ink-color="#1e66f5"]');
+    await stroke(0.2, 0.3, 0.7, 0.35); eq(await inkCount(), 1);
+    await page.goBack();
+    await page.waitForFunction((b) => N.docs._state.docs.find((d) => d.name === 'Lungo').size > b, before);
+    await page.waitForFunction(() => !document.querySelector('.pdf-body'));
+  });
+  await t('dopo l’uscita siamo di nuovo nell’elenco dei documenti', async () => { ok(await page.locator('.docs-screen').count() === 1); });
   await t('PDF senza testo (scansione): la ricerca lo dice con «Nessun testo»', async () => {
     await openDoc('Scansione');
     await page.click('[data-pdf-search]'); await page.fill('[data-pdf-q]', 'ciao');

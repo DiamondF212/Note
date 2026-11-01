@@ -82,4 +82,24 @@ t('clampZoom: limiti 0,5–5 e arrotondamento a 2 decimali', () => {
   assert.strictEqual(L.clampZoom(1.2345), 1.23);
   assert.strictEqual(L.clampZoom(1), 1);
 });
+t('thinPoints: toglie i punti troppo vicini, tiene primo e punti lontani', () => {
+  assert.deepStrictEqual(L.thinPoints([[0, 0], [0.1, 0], [0.2, 0], [5, 0], [5.1, 0], [10, 0]], 1), [[0, 0], [5, 0], [10, 0]]);
+  assert.deepStrictEqual(L.thinPoints([], 1), []);
+});
+t('pathOf: percorso SVG; un solo punto diventa un puntino; y trasformabile', () => {
+  assert.strictEqual(L.pathOf([[1, 2], [3, 4.567]]), 'M1 2 L3 4.57');
+  assert.strictEqual(L.pathOf([[5, 6]]), 'M5 6 L5.01 6');
+  assert.strictEqual(L.pathOf([[1, 2], [3, 4]], (y) => -y), 'M1 -2 L3 -4');
+  assert.strictEqual(L.pathOf([]), '');
+});
+t('hexRgb: colori esadecimali in frazioni 0–1; valori strani = nero', () => {
+  assert.deepStrictEqual(L.hexRgb('#ff0000'), [1, 0, 0]);
+  assert.deepStrictEqual(L.hexRgb('00ff00'), [0, 1, 0]);
+  assert.deepStrictEqual(L.hexRgb('rosso'), [0, 0, 0]);
+});
+t('strumenti: l’evidenziatore è largo e trasparente, la penna sottile e piena', () => {
+  assert.ok(L.INK_TOOLS.hl.w > L.INK_TOOLS.pen.w * 3);
+  assert.ok(L.INK_TOOLS.hl.op < 1 && L.INK_TOOLS.pen.op === 1);
+  assert.ok(L.INK_COLORS.length >= 5);
+});
 console.log('\n' + n + ' test unitari PDF superati');

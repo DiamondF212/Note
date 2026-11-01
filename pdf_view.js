@@ -93,6 +93,30 @@
     return [a, b];
   }
 
+  // Tratto a mano libera: toglie i punti troppo vicini (alleggerisce) e lo trasforma in un percorso SVG.
+  function thinPoints(pts, minD) {
+    const out = [];
+    for (const p of pts) {
+      const l = out[out.length - 1];
+      if (!l || Math.hypot(p[0] - l[0], p[1] - l[1]) >= minD) out.push([p[0], p[1]]);
+    }
+    return out;
+  }
+  function pathOf(pts, fy) {
+    if (!pts || !pts.length) return '';
+    const f = fy || ((y) => y), r = (v) => Math.round(v * 100) / 100;
+    const q = pts.length === 1 ? [pts[0], [pts[0][0] + 0.01, pts[0][1]]] : pts; // un tocco solo = un puntino
+    return q.map((p, i) => (i ? 'L' : 'M') + r(p[0]) + ' ' + r(f(p[1]))).join(' ');
+  }
+  function hexRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex));
+    if (!m) return [0, 0, 0];
+    const n = parseInt(m[1], 16);
+    return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+  }
+  const INK_TOOLS = { pen: { w: 2.2, op: 1 }, hl: { w: 14, op: 0.4 } };
+  const INK_COLORS = ['#ffeb3b', '#69f0ae', '#ff80ab', '#e53935', '#1e66f5', '#111111'];
+
   const ZMIN = 0.5, ZMAX = 5;
   const clampZoom = (z) => Math.min(ZMAX, Math.max(ZMIN, Math.round(z * 100) / 100));
 
@@ -106,6 +130,8 @@
     minus: '<svg class="i" viewBox="0 0 24 24" width="22" height="22"><path d="M5 12h14"/></svg>',
     up: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M6 14l6-6 6 6"/></svg>',
     down: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M6 10l6 6 6-6"/></svg>',
+    pen: '<svg class="i" viewBox="0 0 24 24" width="22" height="22"><path d="M4 20l1-4L16.5 4.5a2 2 0 013 3L8 19l-4 1z"/></svg>',
+    undo: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 010 12"/></svg>',
     x: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M6 6l12 12M18 6L6 18"/></svg>'
   };
 
@@ -181,8 +207,13 @@
     const pages = [];
     for (let i = 0; i < n; i++) {
       const hl = h('div', { class: 'pdf-hl' });
-      const el = h('div', { class: 'pdf-page', 'data-page': String(i + 1), role: 'img', 'aria-label': 'Pagina ' + (i + 1) + ' di ' + n }, hl);
-      pages.push({ el, hl, canvas: null, key: null, busy: false, gen: 0, task: null, cs: 1, err: false });
+      const ink = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      ink.setAttribute('class', 'pdf-ink');
+      ink.setAttribute('viewBox', '0 0 ' + base[i].w + ' ' + base[i].h);
+      ink.setAttribute('preserveAspectRatio', 'none');
+      ink.dataset.page = String(i);
+      const el = h('div', { class: 'pdf-page', 'data-page': String(i + 1), role: 'img', 'aria-label': 'Pagina ' + (i + 1) + ' di ' + n }, hl, ink);
+      pages.push({ el, hl, ink, canvas: null, key: null, busy: false, gen: 0, task: null, cs: 1, err: false });
       inner.append(el);
     }
     let tops = [], heights = [];
@@ -426,6 +457,7 @@
     function toggleSearch(force) {
       const on = force === undefined ? !sBar.classList.contains('on') : force;
       sBar.classList.toggle('on', on);
+      if (on && I.on) toggleInk(false);
       if (on) { sInput.focus(); sInput.select(); }
       else { sInput.blur(); S.token++; S.q = ''; S.matches = []; S.byPage = new Map(); S.idx = -1; S.searching = ''; setCount(); redrawAllHighlights(); }
     }
@@ -475,6 +507,137 @@
       A.toast('Nota creata dal testo del PDF');
     }
 
+    /* ---------- annotazioni a mano libera (penna ed evidenziatore) ---------- */
+    const ann = pages.map(() => []);          // tratti per pagina, in coordinate della pagina a zoom 1
+    const hist = [];                          // ordine di disegno, per «Annulla»
+    const I = { on: false, tool: 'hl', color: INK_COLORS[0], saving: false };
+    const NS = 'http://www.w3.org/2000/svg';
+    const pathEl = (st) => {
+      const e = document.createElementNS(NS, 'path');
+      e.setAttribute('d', pathOf(st.pts));
+      e.setAttribute('fill', 'none');
+      e.setAttribute('stroke', st.color);
+      e.setAttribute('stroke-width', st.w);
+      e.setAttribute('stroke-opacity', st.op);
+      e.setAttribute('stroke-linecap', 'round');
+      e.setAttribute('stroke-linejoin', 'round');
+      return e;
+    };
+    const tBtn = (attr, label, html, fn) => h('button', Object.assign({ class: 'ibtn pdf-tb', 'aria-label': label, title: label, html, onclick: fn }, attr));
+    const colorBtns = INK_COLORS.map((c) => h('button', { class: 'pdf-col', 'data-ink-color': c, 'aria-label': 'Colore ' + c, style: { background: c }, onclick: () => { I.color = c; paintBar(); } }));
+    const penBtn = tBtn({ 'data-ink-pen': '1' }, 'Penna', SV.pen, () => { I.tool = 'pen'; if (I.color === INK_COLORS[0]) I.color = INK_COLORS[4]; paintBar(); });
+    const hlBtn = h('button', { class: 'pdf-tb pdf-hlbtn', 'data-ink-hl': '1', 'aria-label': 'Evidenziatore', onclick: () => { I.tool = 'hl'; if (I.color === INK_COLORS[4] || I.color === INK_COLORS[5]) I.color = INK_COLORS[0]; paintBar(); } }, 'Evidenzia');
+    const undoBtn = tBtn({ 'data-ink-undo': '1' }, 'Annulla ultimo tratto', SV.undo, () => undoInk());
+    const saveBtn = h('button', { class: 'pdf-savebtn', 'data-ink-save': '1', onclick: () => saveInk() }, 'Salva');
+    const tBar = h('div', { class: 'pdf-tools' }, penBtn, hlBtn, ...colorBtns, undoBtn, saveBtn,
+      h('button', { class: 'ibtn pdf-tb', 'data-ink-close': '1', 'aria-label': 'Chiudi le annotazioni', html: SV.x, onclick: () => toggleInk(false) }));
+    scr.el.insertBefore(tBar, body);
+    function paintBar() {
+      penBtn.classList.toggle('on', I.tool === 'pen');
+      hlBtn.classList.toggle('on', I.tool === 'hl');
+      colorBtns.forEach((b) => b.classList.toggle('on', b.dataset.inkColor === I.color));
+      undoBtn.disabled = !hist.length;
+      saveBtn.disabled = !hist.length || I.saving;
+    }
+    function toggleInk(force) {
+      I.on = force === undefined ? !I.on : force;
+      tBar.classList.toggle('on', I.on);
+      body.classList.toggle('inking', I.on);
+      if (I.on) toggleSearch(false);
+      paintBar();
+    }
+    function drawInk(i) {
+      const svg = pages[i].ink;
+      svg.replaceChildren();
+      for (const st of ann[i]) svg.append(pathEl(st));
+    }
+    function undoInk() {
+      const last = hist.pop();
+      if (!last) return;
+      const k = ann[last.page].indexOf(last.st);
+      if (k >= 0) ann[last.page].splice(k, 1);
+      drawInk(last.page);
+      paintBar();
+    }
+
+    // disegno con il dito (o il mouse): un solo dito disegna, due dita = zoom (il tratto in corso viene scartato)
+    const ptrs = new Set();
+    let cur_ = null;
+    function toBase(e, svg, i) {
+      const r = svg.getBoundingClientRect();
+      return [(e.clientX - r.left) / Math.max(1, r.width) * base[i].w, (e.clientY - r.top) / Math.max(1, r.height) * base[i].h];
+    }
+    function dropStroke() { if (cur_) { cur_.el.remove(); cur_ = null; } }
+    inner.addEventListener('pointerdown', (e) => {
+      const svg = e.target.closest && e.target.closest('.pdf-ink');
+      if (!I.on || !svg) return;
+      ptrs.add(e.pointerId);
+      if (ptrs.size > 1) { dropStroke(); return; }
+      const i = +svg.dataset.page, t = INK_TOOLS[I.tool];
+      const st = { tool: I.tool, color: I.color, w: t.w, op: t.op, pts: [toBase(e, svg, i)] };
+      cur_ = { i, st, svg, el: pathEl(st), id: e.pointerId };
+      svg.append(cur_.el);
+      try { svg.setPointerCapture(e.pointerId); } catch (x) { /* non fondamentale */ }
+      e.preventDefault();
+    });
+    inner.addEventListener('pointermove', (e) => {
+      if (!cur_ || e.pointerId !== cur_.id || ptrs.size > 1) return;
+      const p = toBase(e, cur_.svg, cur_.i), l = cur_.st.pts[cur_.st.pts.length - 1];
+      if (Math.hypot(p[0] - l[0], p[1] - l[1]) < 0.6) return;
+      cur_.st.pts.push(p);
+      cur_.el.setAttribute('d', pathOf(cur_.st.pts));
+    });
+    const endPtr = (e) => {
+      ptrs.delete(e.pointerId);
+      if (!cur_ || e.pointerId !== cur_.id) return;
+      const c = cur_; cur_ = null;
+      if (e.type === 'pointercancel') { c.el.remove(); return; }
+      c.st.pts = thinPoints(c.st.pts, 0.5);
+      ann[c.i].push(c.st);
+      hist.push({ page: c.i, st: c.st });
+      c.el.setAttribute('d', pathOf(c.st.pts));
+      paintBar();
+    };
+    inner.addEventListener('pointerup', endPtr);
+    inner.addEventListener('pointercancel', endPtr);
+
+    // scrive i tratti dentro il PDF (restano visibili in qualsiasi lettore) e sostituisce il file nell'archivio
+    async function bake() {
+      await A.lib('pdflib');
+      const { PDFDocument, rgb, LineCapStyle } = window.PDFLib;
+      const doc = await PDFDocument.load(d.data.slice(0), { ignoreEncryption: true });
+      const ps = doc.getPages();
+      for (let i = 0; i < n; i++) {
+        if (!ann[i].length || !ps[i]) continue;
+        const vp = pageObjs[i].getViewport({ scale: 1 });
+        for (const st of ann[i]) {
+          const pts = st.pts.map(([x, y]) => vp.convertToPdfPoint(x, y));
+          const c = hexRgb(st.color);
+          ps[i].drawSvgPath(pathOf(pts, (y) => -y), { x: 0, y: 0, borderColor: rgb(c[0], c[1], c[2]), borderWidth: st.w, borderOpacity: st.op, borderLineCap: LineCapStyle.Round });
+        }
+      }
+      const out = await doc.save();
+      d.data = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
+      await A.save(d);
+    }
+    async function saveInk() {
+      if (I.saving || !hist.length) return;
+      I.saving = true; paintBar();
+      try {
+        await bake();
+        hist.length = 0; ann.forEach((x) => { x.length = 0; });
+        A.toast('Annotazioni salvate nel PDF');
+        await A.back();       // chiude questo lettore (la posizione viene ricordata)…
+        openPdf(d, A).catch((e) => A.toast('Impossibile riaprire: ' + (e.message || e), 4500)); // …e lo riapre sul file aggiornato
+      } catch (e) {
+        console.error(e);
+        A.toast('Impossibile salvare le annotazioni: ' + (e.message || e), 5000);
+        I.saving = false; paintBar();
+      }
+    }
+    scr.actions.insertBefore(btn(SV.pen, () => toggleInk(), 'Annota', { 'data-pdf-annot': '1' }), scr.actions.lastChild);
+    paintBar();
+
     /* ---------- ricorda dove eri arrivato ---------- */
     let saveT = 0, lastPos = null;
     // Quando la schermata si chiude è già staccata dalla pagina (scrollTop = 0): in quel caso vale l'ultima posizione letta.
@@ -494,6 +657,10 @@
     function cleanup() {
       if (dead) return;
       try { savePosNow(); } catch (e) { /* ignora */ }
+      if (hist.length && !I.saving) { // uscita senza aver premuto «Salva»: le annotazioni non si perdono
+        I.saving = true;
+        bake().then(() => A.toast('Annotazioni salvate nel PDF')).catch((e) => { console.error(e); A.toast('Annotazioni NON salvate: ' + (e.message || e), 5000); });
+      }
       dead = true;
       clearTimeout(saveT); clearTimeout(sTimer); clearTimeout(onResize.t);
       window.removeEventListener('resize', onResize);
@@ -521,6 +688,6 @@
     N.docs.register('pdf', { open: (d, A) => openPdf(d, A) });
   }
 
-  N.pdfView = { _logic: { fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom } };
+  N.pdfView = { _logic: { fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS } };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.pdfView;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));
