@@ -1,0 +1,16 @@
+{
+  "appId": "it.francesco.lemienote",
+  "appName": "Le Mie Note",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#FF9F0A"
+    }
+  }
+}
