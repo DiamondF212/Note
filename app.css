@@ -567,3 +567,28 @@ main#list { padding-top: 8px; }
 .pdf-col { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); }
 .pdf-col.on { border-color: var(--ink); transform: scale(1.15); }
 .pdf-savebtn { flex: none; margin-left: auto; padding: 0 16px; height: 38px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---- PDF: firma e testo nuovo ---- */
+@font-face { font-family: 'LibSans'; src: url('vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf'); font-weight: 400; }
+@font-face { font-family: 'LibSans'; src: url('vendor/pdfjs/standard_fonts/LiberationSans-Bold.ttf'); font-weight: 700; }
+.pdf-objs { position: absolute; inset: 0; pointer-events: none; }
+.pdf-obj { position: absolute; pointer-events: auto; touch-action: none; cursor: move; line-height: 1.2; font-family: 'LibSans', 'Liberation Sans', Arial, Helvetica, sans-serif; user-select: none; -webkit-user-select: none; }
+.pdf-obj[data-obj="text"] { white-space: pre; }
+.pdf-obj.sel { outline: 2px dashed var(--accent); outline-offset: 2px; z-index: 6; }
+.pdf-sigsvg { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.pdf-otext { pointer-events: none; }
+.pdf-octl { position: absolute; left: 0; top: -44px; display: flex; gap: 6px; }
+.pdf-octl button { width: 36px; height: 36px; border-radius: 50%; background: var(--surface); color: var(--ink); border: 1px solid var(--line); display: grid; place-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+.pdf-orz { position: absolute; right: -16px; bottom: -44px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; box-sizing: border-box; cursor: nwse-resize; transform: translateY(26px); }
+.pdf-pad { width: 100%; height: auto; aspect-ratio: 600 / 220; background: #fff; border-radius: 14px; border: 1px solid var(--line); touch-action: none; display: block; cursor: crosshair; }
+.pdf-padline { stroke: #c8c8c8; stroke-width: 1.5; fill: none; }
+.pdf-padbtns { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+.pdf-ghost { height: 44px; padding: 0 18px; border-radius: 999px; background: var(--surface2); color: var(--ink); font-weight: 650; }
+.pdf-wide { margin-left: auto; height: 44px; padding: 0 22px; }
+.pdf-hint { margin: 0 2px 10px; color: var(--muted); font-size: .9em; text-align: center; }
+.pdf-sigprev { background: #fff; border-radius: 12px; border: 1px solid var(--line); padding: 14px; margin: 0 0 10px; max-height: 120px; box-sizing: border-box; }
+.pdf-sigprev .pdf-sigsvg { width: 100%; height: 100%; }
+.pdf-ta { width: 100%; box-sizing: border-box; min-height: 90px; padding: 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); font: inherit; font-size: 1.05em; resize: vertical; outline: none; }
+.pdf-txtrow { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+.pdf-sizelbl { min-width: 2.2em; text-align: center; font-weight: 700; }
+.pdf-ins .pdf-hlbtn { background: var(--surface2); }

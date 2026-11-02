@@ -102,4 +102,36 @@ t('strumenti: l’evidenziatore è largo e trasparente, la penna sottile e piena
   assert.ok(L.INK_TOOLS.hl.op < 1 && L.INK_TOOLS.pen.op === 1);
   assert.ok(L.INK_COLORS.length >= 5);
 });
+
+t('normSignature: altezza = 1, larghezza = rapporto; vuoto = null', () => {
+  assert.strictEqual(L.normSignature([]), null);
+  assert.strictEqual(L.normSignature([[]]), null);
+  const s = L.normSignature([[[10, 20], [110, 20], [60, 70]]]);
+  assert.strictEqual(s.ar, 2);
+  assert.deepStrictEqual(s.strokes[0][0], [0, 0]);
+  assert.deepStrictEqual(s.strokes[0][1], [2, 0]);
+  assert.deepStrictEqual(s.strokes[0][2], [1, 1]);
+});
+t('normSignature: un solo puntino non fa dividere per zero', () => {
+  const s = L.normSignature([[[5, 5]]]);
+  assert.ok(isFinite(s.ar) && s.ar > 0);
+});
+t('textBaselines: una linea di base per ogni riga, distanti 1,2 volte il corpo', () => {
+  const b = L.textBaselines({ y: 100, size: 10, text: 'a\nb\nc' });
+  assert.strictEqual(b.length, 3);
+  assert.ok(Math.abs(b[0] - (100 + 9.465)) < 1e-9);
+  assert.ok(Math.abs(b[1] - b[0] - 12) < 1e-9);
+});
+t('textLines: gestisce a capo di Windows e testo vuoto', () => {
+  assert.deepStrictEqual(L.textLines('a\r\nb'), ['a', 'b']);
+  assert.deepStrictEqual(L.textLines(''), ['']);
+  assert.deepStrictEqual(L.textLines(null), ['']);
+});
+t('clamp: tiene un numero tra due limiti', () => {
+  assert.strictEqual(L.clamp(5, 0, 3), 3); assert.strictEqual(L.clamp(-1, 0, 3), 0); assert.strictEqual(L.clamp(2, 0, 3), 2);
+});
+t('pathOf: precisione scelta (le firme normalizzate hanno bisogno di più decimali)', () => {
+  assert.strictEqual(L.pathOf([[0.12345, 0.5]], null, 1e4).split(' ')[0], 'M0.1235');
+  assert.strictEqual(L.pathOf([[0.12345, 0.5]]).split(' ')[0], 'M0.12');
+});
 console.log('\n' + n + ' test unitari PDF superati');

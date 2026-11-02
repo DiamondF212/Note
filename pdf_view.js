@@ -102,9 +102,9 @@
     }
     return out;
   }
-  function pathOf(pts, fy) {
+  function pathOf(pts, fy, prec) {
     if (!pts || !pts.length) return '';
-    const f = fy || ((y) => y), r = (v) => Math.round(v * 100) / 100;
+    const f = fy || ((y) => y), k = prec || 100, r = (v) => Math.round(v * k) / k;
     const q = pts.length === 1 ? [pts[0], [pts[0][0] + 0.01, pts[0][1]]] : pts; // un tocco solo = un puntino
     return q.map((p, i) => (i ? 'L' : 'M') + r(p[0]) + ' ' + r(f(p[1]))).join(' ');
   }
@@ -116,6 +116,26 @@
   }
   const INK_TOOLS = { pen: { w: 2.2, op: 1 }, hl: { w: 14, op: 0.4 } };
   const INK_COLORS = ['#ffeb3b', '#69f0ae', '#ff80ab', '#e53935', '#1e66f5', '#111111'];
+
+  // Firma: i tratti disegnati nel riquadro vengono normalizzati (altezza = 1, larghezza = ar) così si possono
+  // ridimensionare a piacere. Restituisce null se non c'è nulla di disegnato.
+  function normSignature(strokes) {
+    const ss = (strokes || []).filter((s) => s && s.length);
+    if (!ss.length) return null;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const s of ss) for (const p of s) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
+    const bh = Math.max(1, y1 - y0), bw = Math.max(1, x1 - x0);
+    const r = (v) => Math.round(v * 1e4) / 1e4;
+    return { ar: r(bw / bh), strokes: ss.map((s) => s.map((p) => [r((p[0] - x0) / bh), r((p[1] - y0) / bh)])) };
+  }
+  // Testo nuovo: l'altezza di riga e la posizione della linea di base (in frazioni del corpo) sono quelle del font
+  // Liberation Sans con interlinea 1,2, uguali nell'anteprima sullo schermo e nel PDF salvato.
+  const TEXT_LINE = 1.2, TEXT_BASE = 0.9465;
+  const TEXT_COLORS = ['#111111', '#1e66f5', '#e53935', '#2e7d32', '#6d6d6d'];
+  const textLines = (t) => String(t == null ? '' : t).replace(/\r/g, '').split('\n');
+  // Posizione (sullo schermo, in unità pagina) della linea di base di ogni riga.
+  function textBaselines(o) { return textLines(o.text).map((_, i) => o.y + o.size * (i * TEXT_LINE + TEXT_BASE)); }
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
   const ZMIN = 0.5, ZMAX = 5;
   const clampZoom = (z) => Math.min(ZMAX, Math.max(ZMIN, Math.round(z * 100) / 100));
@@ -132,7 +152,12 @@
     down: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M6 10l6 6 6-6"/></svg>',
     pen: '<svg class="i" viewBox="0 0 24 24" width="22" height="22"><path d="M4 20l1-4L16.5 4.5a2 2 0 013 3L8 19l-4 1z"/></svg>',
     undo: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 010 12"/></svg>',
-    x: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+    x: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    ins: '<svg class="i" viewBox="0 0 24 24" width="22" height="22"><path d="M4 7V5h10v2M9 5v9M7 14h4"/><path d="M13 20c2-3 3-6 5-6s0 5 3 2"/></svg>',
+    sign: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M3 17c2-6 4-9 5-9s0 6 2 6 3-4 4-4 1 3 3 3 2-1 3-2M3 21h18"/></svg>',
+    text: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>',
+    trash: '<svg class="i" viewBox="0 0 24 24" width="18" height="18"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>',
+    edit: '<svg class="i" viewBox="0 0 24 24" width="18" height="18"><path d="M4 20l1-4L16.5 4.5a2 2 0 013 3L8 19l-4 1z"/></svg>'
   };
 
   async function openPdf(d, A) {
@@ -212,8 +237,9 @@
       ink.setAttribute('viewBox', '0 0 ' + base[i].w + ' ' + base[i].h);
       ink.setAttribute('preserveAspectRatio', 'none');
       ink.dataset.page = String(i);
-      const el = h('div', { class: 'pdf-page', 'data-page': String(i + 1), role: 'img', 'aria-label': 'Pagina ' + (i + 1) + ' di ' + n }, hl, ink);
-      pages.push({ el, hl, ink, canvas: null, key: null, busy: false, gen: 0, task: null, cs: 1, err: false });
+      const ol = h('div', { class: 'pdf-objs' });
+      const el = h('div', { class: 'pdf-page', 'data-page': String(i + 1), role: 'img', 'aria-label': 'Pagina ' + (i + 1) + ' di ' + n }, hl, ink, ol);
+      pages.push({ el, hl, ink, ol, canvas: null, key: null, busy: false, gen: 0, task: null, cs: 1, err: false });
       inner.append(el);
     }
     let tops = [], heights = [];
@@ -228,6 +254,7 @@
         p.cs = (fitW / base[i].w) * zoom;
         p.el.style.width = Math.round(base[i].w * p.cs) + 'px';
         p.el.style.height = Math.round(base[i].h * p.cs) + 'px';
+        p.el.style.setProperty('--cs', String(p.cs));
         p.hl.replaceChildren();
       }
       tops = pages.map((p) => p.el.offsetTop);
@@ -331,6 +358,7 @@
     let pinch = null, lastTap = 0, tapPos = null;
     const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
     body.addEventListener('touchstart', (e) => {
+      if (e.target.closest && e.target.closest('.pdf-obj')) { tapPos = null; if (e.touches.length < 2) return; }
       if (e.touches.length === 2) { pinch = { d0: dist(e.touches), z0: zoom, r: 1 }; tapPos = null; }
       else if (e.touches.length === 1) tapPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }, { passive: true });
@@ -458,6 +486,7 @@
       const on = force === undefined ? !sBar.classList.contains('on') : force;
       sBar.classList.toggle('on', on);
       if (on && I.on) toggleInk(false);
+      if (on) toggleIns(false);
       if (on) { sInput.focus(); sInput.select(); }
       else { sInput.blur(); S.token++; S.q = ''; S.matches = []; S.byPage = new Map(); S.idx = -1; S.searching = ''; setCount(); redrawAllHighlights(); }
     }
@@ -514,7 +543,7 @@
     const NS = 'http://www.w3.org/2000/svg';
     const pathEl = (st) => {
       const e = document.createElementNS(NS, 'path');
-      e.setAttribute('d', pathOf(st.pts));
+      e.setAttribute('d', pathOf(st.pts, null, st.prec));
       e.setAttribute('fill', 'none');
       e.setAttribute('stroke', st.color);
       e.setAttribute('stroke-width', st.w);
@@ -537,13 +566,15 @@
       hlBtn.classList.toggle('on', I.tool === 'hl');
       colorBtns.forEach((b) => b.classList.toggle('on', b.dataset.inkColor === I.color));
       undoBtn.disabled = !hist.length;
-      saveBtn.disabled = !hist.length || I.saving;
+      saveBtn.disabled = !hasChanges() || I.saving;
+      insSave.disabled = !hasChanges() || I.saving;
     }
+    function hasChanges() { return hist.length > 0 || objs.length > 0; }
     function toggleInk(force) {
       I.on = force === undefined ? !I.on : force;
       tBar.classList.toggle('on', I.on);
       body.classList.toggle('inking', I.on);
-      if (I.on) toggleSearch(false);
+      if (I.on) { toggleSearch(false); toggleIns(false); }
       paintBar();
     }
     function drawInk(i) {
@@ -601,10 +632,10 @@
     inner.addEventListener('pointerup', endPtr);
     inner.addEventListener('pointercancel', endPtr);
 
-    // scrive i tratti dentro il PDF (restano visibili in qualsiasi lettore) e sostituisce il file nell'archivio
+    // scrive tratti, firme e testi dentro il PDF (restano visibili in qualsiasi lettore) e sostituisce il file nell'archivio
     async function bake() {
       await A.lib('pdflib');
-      const { PDFDocument, rgb, LineCapStyle } = window.PDFLib;
+      const { PDFDocument, rgb, LineCapStyle, degrees } = window.PDFLib;
       const doc = await PDFDocument.load(d.data.slice(0), { ignoreEncryption: true });
       const ps = doc.getPages();
       for (let i = 0; i < n; i++) {
@@ -616,16 +647,51 @@
           ps[i].drawSvgPath(pathOf(pts, (y) => -y), { x: 0, y: 0, borderColor: rgb(c[0], c[1], c[2]), borderWidth: st.w, borderOpacity: st.op, borderLineCap: LineCapStyle.Round });
         }
       }
+      // firme (tratti scalati nel rettangolo scelto) e testi (font Liberation Sans incorporato, accenti compresi)
+      const fonts = {};
+      const fontFor = async (bold) => {
+        const k = bold ? 'b' : 'r';
+        if (fonts[k]) return fonts[k];
+        doc.registerFontkit(window.fontkit);
+        const r = await fetch('vendor/pdfjs/standard_fonts/LiberationSans-' + (bold ? 'Bold' : 'Regular') + '.ttf');
+        if (!r.ok) throw new Error('font non trovato');
+        const f = await doc.embedFont(await r.arrayBuffer(), { subset: true });
+        fonts[k] = { f, set: new Set(f.getCharacterSet()) };
+        return fonts[k];
+      };
+      for (const o of objs) {
+        const pg = ps[o.page];
+        if (!pg) continue;
+        const vp = pageObjs[o.page].getViewport({ scale: 1 });
+        if (o.kind === 'sig') {
+          const sc = o.w / o.ar, c = hexRgb(o.color);
+          for (const stk of o.strokes) {
+            const pts = stk.map(([x, y]) => vp.convertToPdfPoint(o.x + x * sc, o.y + y * sc));
+            pg.drawSvgPath(pathOf(pts, (y) => -y), { x: 0, y: 0, borderColor: rgb(c[0], c[1], c[2]), borderWidth: Math.max(0.6, o.w * SIG_STROKE), borderLineCap: LineCapStyle.Round });
+          }
+        } else {
+          const { f, set } = await fontFor(o.bold);
+          const c = hexRgb(o.color), bl = textBaselines(o);
+          textLines(o.text).forEach((line, k) => {
+            let ln = '';
+            for (const ch of line) ln += set.has(ch.codePointAt(0)) ? ch : '?';
+            if (!ln.trim()) return;
+            const [px, py] = vp.convertToPdfPoint(o.x, bl[k]);
+            pg.drawText(ln, { x: px, y: py, size: o.size, font: f, color: rgb(c[0], c[1], c[2]), rotate: degrees(vp.rotation || 0) });
+          });
+        }
+      }
       const out = await doc.save();
       d.data = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
       await A.save(d);
     }
     async function saveInk() {
-      if (I.saving || !hist.length) return;
+      if (I.saving || !hasChanges()) return;
       I.saving = true; paintBar();
       try {
         await bake();
         hist.length = 0; ann.forEach((x) => { x.length = 0; });
+        objs.length = 0; selId = null;
         A.toast('Annotazioni salvate nel PDF');
         await A.back();       // chiude questo lettore (la posizione viene ricordata)…
         openPdf(d, A).catch((e) => A.toast('Impossibile riaprire: ' + (e.message || e), 4500)); // …e lo riapre sul file aggiornato
@@ -636,6 +702,270 @@
       }
     }
     scr.actions.insertBefore(btn(SV.pen, () => toggleInk(), 'Annota', { 'data-pdf-annot': '1' }), scr.actions.lastChild);
+
+    /* ---------- firma e testo nuovo ---------- */
+    const SIG_STROKE = 0.014;                 // spessore della firma in rapporto alla sua larghezza
+    const objs = [];                          // oggetti ancora da scrivere nel PDF
+    let selId = null, oid = 0, sigSaved = null;
+    try { sigSaved = await N.db.getMeta('signature'); } catch (e) { sigSaved = null; }
+    if (dead) return;
+    if (!sigSaved || !sigSaved.strokes || !sigSaved.ar) sigSaved = null;
+
+    const svgOf = (sig, color, sw) => {
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 ' + sig.ar + ' 1');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      svg.setAttribute('class', 'pdf-sigsvg');
+      for (const stk of sig.strokes) {
+        const e = pathEl({ pts: stk, color, w: sw, op: 1, prec: 1e4 });
+        e.setAttribute('vector-effect', 'none');
+        svg.append(e);
+      }
+      return svg;
+    };
+    const objById = (id) => objs.find((o) => o.id === id);
+
+    // posizione e misure dell'oggetto sulla pagina (in percentuale: seguono lo zoom da sole)
+    function placeObj(o) {
+      const el = o.el, b = base[o.page];
+      el.style.left = (o.x / b.w * 100) + '%';
+      el.style.top = (o.y / b.h * 100) + '%';
+      if (o.kind === 'sig') {
+        el.style.width = (o.w / b.w * 100) + '%';
+        el.style.aspectRatio = String(o.ar);
+      } else {
+        el.style.fontSize = 'calc(var(--cs) * ' + o.size + 'px)';
+      }
+    }
+    function fillObj(o) {
+      const el = o.el;
+      el.dataset.obj = o.kind;
+      const keep = el.querySelector('.pdf-octl');
+      if (o.kind === 'sig') {
+        el.replaceChildren(svgOf(o, o.color, 0.014 * o.ar));
+      } else {
+        el.style.color = o.color;
+        el.style.fontWeight = o.bold ? '700' : '400';
+        el.replaceChildren(h('span', { class: 'pdf-otext' }, o.text));
+      }
+      if (keep) el.append(keep);
+      placeObj(o);
+    }
+    function bindObj(o) {
+      const el = o.el;
+      el.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.pdf-octl button')) return;
+        e.stopPropagation();
+        select(o.id);
+        const p = pages[o.page];
+        const st = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: o.x, oy: o.y, moved: false };
+        const rz = e.target.closest('.pdf-orz');
+        if (rz) { st.rz = true; st.w0 = o.w; st.s0 = o.size; st.pw0 = el.offsetWidth; }
+        try { el.setPointerCapture(e.pointerId); } catch (x) { /* non fondamentale */ }
+        const mv = (ev) => {
+          if (ev.pointerId !== st.id) return;
+          const dx = (ev.clientX - st.sx) / p.cs, dy = (ev.clientY - st.sy) / p.cs;
+          if (Math.abs(dx) + Math.abs(dy) > 0.5) st.moved = true;
+          const b = base[o.page];
+          if (st.rz) {
+            if (o.kind === 'sig') o.w = clamp(st.w0 + dx, 24, b.w - o.x);
+            else o.size = clamp(Math.round(st.s0 * (1 + (dx * p.cs) / Math.max(20, st.pw0)) * 10) / 10, 6, 120);
+          } else {
+            const wBase = el.offsetWidth / p.cs, hBase = el.offsetHeight / p.cs;
+            o.x = clamp(st.ox + dx, 0, Math.max(0, b.w - wBase));
+            o.y = clamp(st.oy + dy, 0, Math.max(0, b.h - hBase));
+          }
+          placeObj(o);
+        };
+        const up = (ev) => {
+          if (ev.pointerId !== st.id) return;
+          el.removeEventListener('pointermove', mv);
+          el.removeEventListener('pointerup', up);
+          el.removeEventListener('pointercancel', up);
+        };
+        el.addEventListener('pointermove', mv);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+        e.preventDefault();
+      });
+    }
+    function select(id) {
+      selId = id;
+      for (const o of objs) {
+        const on = o.id === id;
+        o.el.classList.toggle('sel', on);
+        const old = o.el.querySelector('.pdf-octl');
+        if (old) old.remove();
+        if (on) {
+          const ctl = h('div', { class: 'pdf-octl' },
+            o.kind === 'text' ? h('button', { 'data-obj-edit': '1', 'aria-label': 'Modifica il testo', html: SV.edit, onclick: () => textSheet(o) }) : null,
+            h('button', { 'data-obj-del': '1', 'aria-label': 'Elimina', html: SV.trash, onclick: () => removeObj(o) }),
+            h('span', { class: 'pdf-orz', 'data-obj-resize': '1', 'aria-label': 'Ridimensiona' }));
+          o.el.append(ctl);
+        }
+      }
+    }
+    function removeObj(o) {
+      const k = objs.indexOf(o);
+      if (k >= 0) objs.splice(k, 1);
+      o.el.remove();
+      if (selId === o.id) selId = null;
+      paintBar();
+    }
+    // tocco su un punto qualsiasi della pagina che non sia un oggetto: deseleziona
+    inner.addEventListener('pointerdown', (e) => { if (selId !== null && !(e.target.closest && e.target.closest('.pdf-obj'))) select(null); });
+
+    // dove mettere un oggetto nuovo: al centro di quello che si vede, sulla pagina in vista
+    function centerSpot() {
+      const i = pageAt(tops, body.scrollTop + body.clientHeight / 2), p = pages[i];
+      const cx = (body.scrollLeft + body.clientWidth / 2 - p.el.offsetLeft) / p.cs;
+      const cy = (body.scrollTop + body.clientHeight / 2 - tops[i]) / p.cs;
+      return { i, cx: clamp(cx, 0, base[i].w), cy: clamp(cy, 0, base[i].h) };
+    }
+    function addObj(o) {
+      o.id = ++oid;
+      const p = pages[o.page];
+      o.el = h('div', { class: 'pdf-obj' });
+      p.ol.append(o.el);
+      objs.push(o);
+      bindObj(o);
+      fillObj(o);
+      // centra l'oggetto sul punto scelto (misurato davvero, per il testo)
+      const b = base[o.page], wB = o.el.offsetWidth / p.cs, hB = o.el.offsetHeight / p.cs;
+      o.x = clamp(o.cx - wB / 2, 0, Math.max(0, b.w - wB));
+      o.y = clamp(o.cy - hB / 2, 0, Math.max(0, b.h - hB));
+      placeObj(o);
+      select(o.id);
+      paintBar();
+    }
+
+    /* firma */
+    function placeSignature(sig) {
+      const sp = centerSpot(), w = Math.min(base[sp.i].w * 0.4, 220);
+      addObj({ kind: 'sig', page: sp.i, cx: sp.cx, cy: sp.cy, w, ar: sig.ar, strokes: sig.strokes, color: '#0b1f6b' });
+      A.toast('Firma inserita: trascinala dove serve, poi premi «Salva»', 3200);
+    }
+    function signaturePad() {
+      const W = 600, H = 220;
+      const strokes = [];
+      let curS = null;
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+      svg.setAttribute('class', 'pdf-pad');
+      svg.setAttribute('data-sig-pad', '1');
+      const guide = document.createElementNS(NS, 'path');
+      guide.setAttribute('d', 'M30 ' + (H - 50) + ' H' + (W - 30));
+      guide.setAttribute('class', 'pdf-padline');
+      svg.append(guide);
+      const useBtn = h('button', { class: 'pdf-savebtn pdf-wide', 'data-sig-use': '1', disabled: true }, 'Usa questa firma');
+      const clearBtn = h('button', { class: 'pdf-ghost', 'data-sig-clear': '1' }, 'Cancella');
+      const upd = () => { useBtn.disabled = !strokes.length; };
+      const pt = (e) => { const r = svg.getBoundingClientRect(); return [(e.clientX - r.left) / Math.max(1, r.width) * W, (e.clientY - r.top) / Math.max(1, r.height) * H]; };
+      svg.addEventListener('pointerdown', (e) => {
+        const s = [pt(e)];
+        const el = pathEl({ pts: s, color: '#0b1f6b', w: 3.2, op: 1 });
+        svg.append(el);
+        curS = { s, el, id: e.pointerId };
+        try { svg.setPointerCapture(e.pointerId); } catch (x) { /* non fondamentale */ }
+        e.preventDefault();
+      });
+      svg.addEventListener('pointermove', (e) => {
+        if (!curS || e.pointerId !== curS.id) return;
+        curS.s.push(pt(e));
+        curS.el.setAttribute('d', pathOf(curS.s));
+      });
+      const end = (e) => {
+        if (!curS || e.pointerId !== curS.id) return;
+        const c = curS; curS = null;
+        c.s = thinPoints(c.s, 1);
+        strokes.push(c.s);
+        c.el.setAttribute('d', pathOf(c.s));
+        upd();
+      };
+      svg.addEventListener('pointerup', end);
+      svg.addEventListener('pointercancel', end);
+      clearBtn.addEventListener('click', () => { strokes.length = 0; svg.querySelectorAll('path:not(.pdf-padline)').forEach((x) => x.remove()); upd(); });
+      useBtn.addEventListener('click', async () => {
+        const sig = normSignature(strokes);
+        if (!sig) return;
+        sigSaved = sig;
+        try { await N.db.setMeta('signature', sig); } catch (e) { /* la firma resta usabile in questa sessione */ }
+        await A.back();
+        placeSignature(sig);
+      });
+      A.openSheet('Disegna la tua firma', h('div', null,
+        h('p', { class: 'pdf-hint' }, 'Firma con il dito nel riquadro. Resta salvata solo su questo telefono.'),
+        svg, h('div', { class: 'pdf-padbtns' }, clearBtn, useBtn)));
+    }
+    function signatureMenu() {
+      if (!sigSaved) return signaturePad();
+      const prev = h('div', { class: 'pdf-sigprev', 'data-sig-prev': '1' }, svgOf(sigSaved, '#0b1f6b', 0.02 * sigSaved.ar));
+      prev.style.aspectRatio = String(sigSaved.ar);
+      A.openSheet('Firma', h('div', null, prev,
+        h('button', { class: 'item', 'data-sig-place': '1', onclick: async () => { await A.back(); placeSignature(sigSaved); } }, h('span', { html: SV.sign }), 'Usa la firma salvata'),
+        h('button', { class: 'item', 'data-sig-new': '1', onclick: async () => { await A.back(); signaturePad(); } }, h('span', { html: SV.pen }), 'Disegna una nuova firma'),
+        h('button', { class: 'item danger', 'data-sig-del': '1', onclick: async () => { sigSaved = null; try { await N.db.setMeta('signature', null); } catch (e) { /* ignora */ } await A.back(); A.toast('Firma eliminata'); } }, h('span', { html: SV.trash }), 'Elimina la firma salvata')));
+    }
+
+    /* testo */
+    function textSheet(existing) {
+      const dr = existing ? { text: existing.text, size: existing.size, color: existing.color, bold: existing.bold } : { text: '', size: 14, color: TEXT_COLORS[0], bold: false };
+      const ta = h('textarea', { class: 'pdf-ta', rows: 3, placeholder: 'Scrivi qui il testo', 'data-txt-input': '1', 'aria-label': 'Testo da aggiungere' });
+      ta.value = dr.text;
+      const sizeLbl = h('span', { class: 'pdf-sizelbl', 'data-txt-size': '1' }, String(dr.size));
+      const boldBtn = h('button', { class: 'pdf-tb pdf-hlbtn', 'data-txt-bold': '1', 'aria-label': 'Grassetto', style: { fontWeight: '800' } }, 'G');
+      const cols = TEXT_COLORS.map((c) => h('button', { class: 'pdf-col', 'data-txt-color': c, 'aria-label': 'Colore ' + c, style: { background: c } }));
+      const done = h('button', { class: 'pdf-savebtn pdf-wide', 'data-txt-done': '1' }, existing ? 'Fatto' : 'Aggiungi');
+      const paint = () => {
+        sizeLbl.textContent = String(dr.size);
+        boldBtn.classList.toggle('on', dr.bold);
+        cols.forEach((b) => b.classList.toggle('on', b.dataset.txtColor === dr.color));
+        ta.style.fontWeight = dr.bold ? '700' : '400';
+        ta.style.color = dr.color;
+      };
+      const setSize = (v) => { dr.size = clamp(Math.round(v), 6, 120); paint(); };
+      boldBtn.addEventListener('click', () => { dr.bold = !dr.bold; paint(); });
+      cols.forEach((b) => b.addEventListener('click', () => { dr.color = b.dataset.txtColor; paint(); }));
+      done.addEventListener('click', async () => {
+        dr.text = ta.value;
+        if (!dr.text.trim()) { ta.focus(); return; }
+        await A.back();
+        if (existing) {
+          Object.assign(existing, dr);
+          fillObj(existing);
+          select(existing.id);
+        } else {
+          const sp = centerSpot();
+          addObj({ kind: 'text', page: sp.i, cx: sp.cx, cy: sp.cy, text: dr.text, size: dr.size, color: dr.color, bold: dr.bold });
+        }
+      });
+      A.openSheet(existing ? 'Modifica il testo' : 'Testo nuovo', h('div', null, ta,
+        h('div', { class: 'pdf-txtrow' },
+          h('button', { class: 'pdf-tb pdf-hlbtn', 'data-txt-smaller': '1', 'aria-label': 'Più piccolo', onclick: () => setSize(dr.size - 2) }, 'A−'),
+          sizeLbl,
+          h('button', { class: 'pdf-tb pdf-hlbtn', 'data-txt-bigger': '1', 'aria-label': 'Più grande', onclick: () => setSize(dr.size + 2) }, 'A+'),
+          boldBtn, ...cols),
+        done));
+      paint();
+      setTimeout(() => { try { ta.focus(); } catch (e) { /* ignora */ } }, 60);
+    }
+
+    // barra «Inserisci»
+    const insSave = h('button', { class: 'pdf-savebtn', 'data-ins-save': '1', onclick: () => saveInk() }, 'Salva');
+    const insBar = h('div', { class: 'pdf-tools pdf-ins' },
+      h('button', { class: 'pdf-hlbtn', 'data-ins-sig': '1', 'aria-label': 'Firma', onclick: () => signatureMenu() }, 'Firma'),
+      h('button', { class: 'pdf-hlbtn', 'data-ins-text': '1', 'aria-label': 'Aggiungi testo', onclick: () => textSheet(null) }, 'Testo'),
+      insSave,
+      h('button', { class: 'ibtn pdf-tb', 'data-ins-close': '1', 'aria-label': 'Chiudi', html: SV.x, onclick: () => toggleIns(false) }));
+    scr.el.insertBefore(insBar, body);
+    function toggleIns(force) {
+      const on = force === undefined ? !insBar.classList.contains('on') : force;
+      insBar.classList.toggle('on', on);
+      if (on) { toggleSearch(false); if (I.on) toggleInk(false); }
+      else if (selId !== null) select(null);
+      paintBar();
+    }
+    scr.actions.insertBefore(btn(SV.ins, () => toggleIns(), 'Firma e testo', { 'data-pdf-insert': '1' }), scr.actions.lastChild);
     paintBar();
 
     /* ---------- ricorda dove eri arrivato ---------- */
@@ -657,7 +987,7 @@
     function cleanup() {
       if (dead) return;
       try { savePosNow(); } catch (e) { /* ignora */ }
-      if (hist.length && !I.saving) { // uscita senza aver premuto «Salva»: le annotazioni non si perdono
+      if (hasChanges() && !I.saving) { // uscita senza aver premuto «Salva»: le annotazioni non si perdono
         I.saving = true;
         bake().then(() => A.toast('Annotazioni salvate nel PDF')).catch((e) => { console.error(e); A.toast('Annotazioni NON salvate: ' + (e.message || e), 5000); });
       }
@@ -688,6 +1018,6 @@
     N.docs.register('pdf', { open: (d, A) => openPdf(d, A) });
   }
 
-  N.pdfView = { _logic: { fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS } };
+  N.pdfView = { _logic: { fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS, normSignature, textLines, textBaselines, clamp, TEXT_LINE, TEXT_BASE, TEXT_COLORS } };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.pdfView;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));
