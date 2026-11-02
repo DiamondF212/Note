@@ -68,3 +68,4 @@ Una sezione **Documenti** (voce nel menu laterale) che funzioni come un mini Off
 ## Cosa fare subito nella nuova conversazione
 
 Leggi lo zip allegato, conferma di aver capito, poi parti dal primo punto non ancora fatto dei «Prossimi passi» (compilazione moduli PDF), seguendo il formato di risposta sopra. Collegati al repository GitHub (`DiamondF212/Note`, oppure `DiamondF212/le-mie-note` se non è ancora stato rinominato) se hai accesso a GitHub; altrimenti lavora sullo zip e dimmi come riportare le modifiche.
+Non eseguire test su passaggi già testati (esegui solo i test dei file che hai toccato e quelli nuovi).
