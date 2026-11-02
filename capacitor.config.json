@@ -1,6 +1,6 @@
 {
   "appId": "it.francesco.lemienote",
-  "appName": "Le Mie Note",
+  "appName": "Note",
   "webDir": "www",
   "server": {
     "androidScheme": "https"

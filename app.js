@@ -1,4 +1,4 @@
-/* Le Mie Note — interfaccia e logica. Tutto funziona offline e i dati restano sul dispositivo. */
+/* Note — interfaccia e logica. Tutto funziona offline e i dati restano sul dispositivo. */
 (function () {
   'use strict';
   const N = window.N;
@@ -1150,7 +1150,7 @@
     const count = (fn) => S.notes.filter((n) => !n._locked && fn(n)).length;
     const item = (icon, label, on, fn, n) => h('button', { class: 'item' + (on ? ' on' : ''), onclick: fn }, h('span', { html: I(icon, 22) }), label, n != null ? h('span', { class: 'n' }, n) : null);
     dr.append(
-      h('h2', null, 'Le Mie Note'),
+      h('h2', null, 'Note'),
       item('notes', 'Tutte le note', f.type === 'all' && !f.folder, () => go({}), count((n) => !n.hidden && !n.trashed && !n.archived)),
       item('bell', 'Promemoria', f.type === 'reminders', () => go({ type: 'reminders' }), count((n) => !n.hidden && !n.trashed && n.reminder)),
       item('notes', 'Panoramica personale', false, async () => { await back(); openDashboard(); }),
@@ -1348,7 +1348,7 @@
   async function restoreBackup(file) {
     let obj;
     try { obj = JSON.parse(await file.text()); } catch (e) { return toast('File non valido'); }
-    if (!obj || obj.format !== 'mie-note-backup') return toast('Questo non è un backup di Le Mie Note');
+    if (!obj || obj.format !== 'mie-note-backup') return toast('Questo non è un backup di Note');
     let payload = obj.payload;
     if (obj.encrypted) {
       const pw = prompt('Questo backup è protetto. Inserisci la password del backup:');

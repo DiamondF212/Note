@@ -114,7 +114,59 @@
     const n = parseInt(m[1], 16);
     return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
   }
-  const INK_TOOLS = { pen: { w: 2.2, op: 1 }, hl: { w: 14, op: 0.4 } };
+  const INK_TOOLS = { pen: { w: 2.2, op: 1 }, hl: { w: 14, op: 0.4 }, txt: { w: 0, op: 0.4 } };
+
+  // ---- Evidenziazione che segue il testo ----
+  // Ogni voce di testo di pdf.js viene trasformata in una "scatola" con origine, direzione di scrittura (d),
+  // direzione "verso l'alto" (u), larghezza e altezza del carattere, tutto in coordinate della pagina a zoom 1.
+  // `tf(item)` restituisce la matrice (già moltiplicata per la vista) della voce.
+  const HL_BELOW = 0.22, HL_ABOVE = 0.92;     // quanto la fascia scende sotto / sale sopra la linea di base (in corpi)
+  function buildBoxes(items, tf) {
+    const out = [];
+    for (const it of items || []) {
+      if (!it || typeof it.str !== 'string' || !it.str.length) continue;
+      const m = tf(it), fh = Math.hypot(m[2], m[3]) || 10, dl = Math.hypot(m[0], m[1]) || 1;
+      const w = Math.max(0, +it.width || 0);
+      if (!(w > 0)) continue;
+      out.push({ it, str: it.str, len: it.str.length, ox: m[4], oy: m[5], dx: m[0] / dl, dy: m[1] / dl, ux: m[2] / fh, uy: m[3] / fh, w, fh });
+    }
+    return out;
+  }
+  // Punto (x, y) della pagina → voce più vicina e posizione del carattere al suo interno.
+  function locate(boxes, x, y) {
+    let best = -1, bd = Infinity, bl = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i], px = x - b.ox, py = y - b.oy;
+      const lx = px * b.dx + py * b.dy, ly = px * b.ux + py * b.uy;
+      const ex = Math.max(0, -lx, lx - b.w), ey = Math.max(0, -ly - HL_BELOW * b.fh, ly - HL_ABOVE * b.fh);
+      const dd = Math.hypot(ex, ey * 1.5);       // una riga sbagliata pesa più di una colonna sbagliata
+      if (dd < bd) { bd = dd; best = i; bl = lx; }
+    }
+    if (best < 0) return null;
+    const b = boxes[best];
+    return { bi: best, off: clamp(Math.round(bl / b.w * b.len), 0, b.len) };
+  }
+  // Dal punto A al punto B (in ordine di lettura): i rettangoli (4 angoli ciascuno) da colorare.
+  // Gli estremi si allargano alla parola intera, così si evidenzia sempre "pulito".
+  function selectQuads(boxes, a, b) {
+    const p = locate(boxes, a[0], a[1]), q = locate(boxes, b[0], b[1]);
+    if (!p || !q) return [];
+    let lo = p, hi = q;
+    if (p.bi > q.bi || (p.bi === q.bi && p.off > q.off)) { lo = q; hi = p; }
+    const quads = [];
+    for (let bi = lo.bi; bi <= hi.bi; bi++) {
+      const bx = boxes[bi];
+      let from = bi === lo.bi ? lo.off : 0, to = bi === hi.bi ? hi.off : bx.len;
+      if (bi === lo.bi) while (from > 0 && bx.str[from - 1] !== ' ') from--;
+      if (bi === hi.bi) while (to < bx.len && bx.str[to] !== ' ') to++;
+      if (to <= from || !bx.str.slice(from, to).trim()) continue;
+      const s = bx.w * from / bx.len, e = bx.w * to / bx.len, r = (v) => Math.round(v * 100) / 100;
+      const pt = (along, up) => [r(bx.ox + bx.dx * along + bx.ux * up * bx.fh), r(bx.oy + bx.dy * along + bx.uy * up * bx.fh)];
+      quads.push([pt(s, -HL_BELOW), pt(e, -HL_BELOW), pt(e, HL_ABOVE), pt(s, HL_ABOVE)]);
+    }
+    return quads;
+  }
+  const quadsPath = (quads, fy) => quads.map((qd) => qd.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + (fy ? fy(p[1]) : p[1])).join(' ') + ' Z').join(' ');
   const INK_COLORS = ['#ffeb3b', '#69f0ae', '#ff80ab', '#e53935', '#1e66f5', '#111111'];
 
   // Firma: i tratti disegnati nel riquadro vengono normalizzati (altezza = 1, larghezza = ar) così si possono
@@ -539,7 +591,7 @@
     /* ---------- annotazioni a mano libera (penna ed evidenziatore) ---------- */
     const ann = pages.map(() => []);          // tratti per pagina, in coordinate della pagina a zoom 1
     const hist = [];                          // ordine di disegno, per «Annulla»
-    const I = { on: false, tool: 'hl', color: INK_COLORS[0], saving: false };
+    const I = { on: false, tool: 'txt', color: INK_COLORS[0], saving: false };
     const NS = 'http://www.w3.org/2000/svg';
     const pathEl = (st) => {
       const e = document.createElementNS(NS, 'path');
@@ -552,18 +604,30 @@
       e.setAttribute('stroke-linejoin', 'round');
       return e;
     };
+    // evidenziazione sul testo: un solo tracciato con più rettangoli (le sovrapposizioni non si scuriscono)
+    const quadEl = (st) => {
+      const e = document.createElementNS(NS, 'path');
+      e.setAttribute('d', quadsPath(st.quads));
+      e.setAttribute('fill', st.color);
+      e.setAttribute('fill-opacity', st.op);
+      e.setAttribute('stroke', 'none');
+      e.setAttribute('class', 'pdf-txthl');
+      return e;
+    };
     const tBtn = (attr, label, html, fn) => h('button', Object.assign({ class: 'ibtn pdf-tb', 'aria-label': label, title: label, html, onclick: fn }, attr));
     const colorBtns = INK_COLORS.map((c) => h('button', { class: 'pdf-col', 'data-ink-color': c, 'aria-label': 'Colore ' + c, style: { background: c }, onclick: () => { I.color = c; paintBar(); } }));
     const penBtn = tBtn({ 'data-ink-pen': '1' }, 'Penna', SV.pen, () => { I.tool = 'pen'; if (I.color === INK_COLORS[0]) I.color = INK_COLORS[4]; paintBar(); });
-    const hlBtn = h('button', { class: 'pdf-tb pdf-hlbtn', 'data-ink-hl': '1', 'aria-label': 'Evidenziatore', onclick: () => { I.tool = 'hl'; if (I.color === INK_COLORS[4] || I.color === INK_COLORS[5]) I.color = INK_COLORS[0]; paintBar(); } }, 'Evidenzia');
+    const hlBtn = h('button', { class: 'pdf-tb pdf-hlbtn', 'data-ink-hl': '1', 'aria-label': 'Evidenziatore a mano libera', onclick: () => { I.tool = 'hl'; if (I.color === INK_COLORS[4] || I.color === INK_COLORS[5]) I.color = INK_COLORS[0]; paintBar(); } }, 'A mano');
+    const txtBtn = h('button', { class: 'pdf-tb pdf-hlbtn', 'data-ink-txt': '1', 'aria-label': 'Evidenzia il testo', onclick: () => { I.tool = 'txt'; if (I.color === INK_COLORS[4] || I.color === INK_COLORS[5]) I.color = INK_COLORS[0]; paintBar(); } }, 'Evidenzia');
     const undoBtn = tBtn({ 'data-ink-undo': '1' }, 'Annulla ultimo tratto', SV.undo, () => undoInk());
     const saveBtn = h('button', { class: 'pdf-savebtn', 'data-ink-save': '1', onclick: () => saveInk() }, 'Salva');
-    const tBar = h('div', { class: 'pdf-tools' }, penBtn, hlBtn, ...colorBtns, undoBtn, saveBtn,
+    const tBar = h('div', { class: 'pdf-tools' }, txtBtn, hlBtn, penBtn, ...colorBtns, undoBtn, saveBtn,
       h('button', { class: 'ibtn pdf-tb', 'data-ink-close': '1', 'aria-label': 'Chiudi le annotazioni', html: SV.x, onclick: () => toggleInk(false) }));
     scr.el.insertBefore(tBar, body);
     function paintBar() {
       penBtn.classList.toggle('on', I.tool === 'pen');
       hlBtn.classList.toggle('on', I.tool === 'hl');
+      txtBtn.classList.toggle('on', I.tool === 'txt');
       colorBtns.forEach((b) => b.classList.toggle('on', b.dataset.inkColor === I.color));
       undoBtn.disabled = !hist.length;
       saveBtn.disabled = !hasChanges() || I.saving;
@@ -580,7 +644,7 @@
     function drawInk(i) {
       const svg = pages[i].ink;
       svg.replaceChildren();
-      for (const st of ann[i]) svg.append(pathEl(st));
+      for (const st of ann[i]) svg.append(st.tool === 'txt' ? quadEl(st) : pathEl(st));
     }
     function undoInk() {
       const last = hist.pop();
@@ -599,12 +663,62 @@
       return [(e.clientX - r.left) / Math.max(1, r.width) * base[i].w, (e.clientY - r.top) / Math.max(1, r.height) * base[i].h];
     }
     function dropStroke() { if (cur_) { cur_.el.remove(); cur_ = null; } }
+    // evidenziazione che segue il testo: si trascina il dito dal primo all'ultimo carattere
+    const geo = new Map();                    // pagina → "scatole" del testo (calcolate una volta sola)
+    async function boxesOf(i) {
+      if (geo.has(i)) return geo.get(i);
+      const t = await getText(i);
+      const vp = pageObjs[i].getViewport({ scale: 1 });
+      const bx = buildBoxes(t.items, (it) => pdfjs.Util.transform(vp.transform, it.transform));
+      geo.set(i, bx);
+      return bx;
+    }
+    let sel_ = null, noTextToast = 0;
+    function dropSel() { if (sel_) { sel_.el.remove(); sel_ = null; } }
+    function paintSel() {
+      if (!sel_ || !sel_.boxes) return;
+      sel_.quads = selectQuads(sel_.boxes, sel_.a, sel_.b);
+      sel_.el.setAttribute('d', quadsPath(sel_.quads));
+    }
+    function startSel(e, svg, i) {
+      const el = document.createElementNS(NS, 'path');
+      el.setAttribute('fill', I.color); el.setAttribute('fill-opacity', INK_TOOLS.txt.op); el.setAttribute('class', 'pdf-txthl');
+      svg.append(el);
+      const a = toBase(e, svg, i);
+      const s = { i, svg, el, a, b: a, id: e.pointerId, boxes: null, quads: [], color: I.color };
+      sel_ = s;
+      ptrs.add(e.pointerId);
+      try { svg.setPointerCapture(e.pointerId); } catch (x) { /* non fondamentale */ }
+      e.preventDefault();
+      boxesOf(i).then((bx) => { s.boxes = bx; if (sel_ === s) paintSel(); }).catch(() => { s.boxes = []; });
+    }
+    function moveSel(e) { sel_.b = toBase(e, sel_.svg, sel_.i); paintSel(); }
+    async function endSel(e) {
+      const s = sel_;
+      if (e.type === 'pointercancel') { dropSel(); return; }
+      s.b = toBase(e, s.svg, s.i);
+      if (!s.boxes) { try { s.boxes = await boxesOf(s.i); } catch (x) { s.boxes = []; } }
+      if (sel_ !== s || dead) return;               // nel frattempo l'azione è stata annullata o il lettore chiuso
+      sel_ = null;
+      s.el.remove();
+      const quads = selectQuads(s.boxes, s.a, s.b);
+      if (!quads.length) {
+        if (!s.boxes.length && Date.now() - noTextToast > 4000) { noTextToast = Date.now(); A.toast('Qui non c’è testo da evidenziare (forse è una scansione): usa «A mano»', 4200); }
+        return;
+      }
+      const st = { tool: 'txt', color: s.color, w: 0, op: INK_TOOLS.txt.op, quads };
+      ann[s.i].push(st);
+      hist.push({ page: s.i, st });
+      drawInk(s.i);
+      paintBar();
+    }
     inner.addEventListener('pointerdown', (e) => {
       const svg = e.target.closest && e.target.closest('.pdf-ink');
       if (!I.on || !svg) return;
       ptrs.add(e.pointerId);
-      if (ptrs.size > 1) { dropStroke(); return; }
+      if (ptrs.size > 1) { dropStroke(); dropSel(); return; }
       const i = +svg.dataset.page, t = INK_TOOLS[I.tool];
+      if (I.tool === 'txt') { startSel(e, svg, i); return; }
       const st = { tool: I.tool, color: I.color, w: t.w, op: t.op, pts: [toBase(e, svg, i)] };
       cur_ = { i, st, svg, el: pathEl(st), id: e.pointerId };
       svg.append(cur_.el);
@@ -612,6 +726,7 @@
       e.preventDefault();
     });
     inner.addEventListener('pointermove', (e) => {
+      if (sel_ && e.pointerId === sel_.id) { if (ptrs.size > 1) dropSel(); else moveSel(e); return; }
       if (!cur_ || e.pointerId !== cur_.id || ptrs.size > 1) return;
       const p = toBase(e, cur_.svg, cur_.i), l = cur_.st.pts[cur_.st.pts.length - 1];
       if (Math.hypot(p[0] - l[0], p[1] - l[1]) < 0.6) return;
@@ -620,6 +735,7 @@
     });
     const endPtr = (e) => {
       ptrs.delete(e.pointerId);
+      if (sel_ && e.pointerId === sel_.id) { endSel(e); return; }
       if (!cur_ || e.pointerId !== cur_.id) return;
       const c = cur_; cur_ = null;
       if (e.type === 'pointercancel') { c.el.remove(); return; }
@@ -642,6 +758,12 @@
         if (!ann[i].length || !ps[i]) continue;
         const vp = pageObjs[i].getViewport({ scale: 1 });
         for (const st of ann[i]) {
+          if (st.tool === 'txt') {
+            const c = hexRgb(st.color);
+            const qs = st.quads.map((qd) => qd.map(([x, y]) => vp.convertToPdfPoint(x, y)));
+            ps[i].drawSvgPath(quadsPath(qs, (y) => -y), { x: 0, y: 0, color: rgb(c[0], c[1], c[2]), opacity: st.op, borderWidth: 0 });
+            continue;
+          }
           const pts = st.pts.map(([x, y]) => vp.convertToPdfPoint(x, y));
           const c = hexRgb(st.color);
           ps[i].drawSvgPath(pathOf(pts, (y) => -y), { x: 0, y: 0, borderColor: rgb(c[0], c[1], c[2]), borderWidth: st.w, borderOpacity: st.op, borderLineCap: LineCapStyle.Round });
@@ -1018,6 +1140,6 @@
     N.docs.register('pdf', { open: (d, A) => openPdf(d, A) });
   }
 
-  N.pdfView = { _logic: { fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS, normSignature, textLines, textBaselines, clamp, TEXT_LINE, TEXT_BASE, TEXT_COLORS } };
+  N.pdfView = { _logic: { buildBoxes, locate, selectQuads, quadsPath, fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS, normSignature, textLines, textBaselines, clamp, TEXT_LINE, TEXT_BASE, TEXT_COLORS } };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.pdfView;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));

@@ -216,6 +216,7 @@ async function makeScan() { // pagina senza testo (come una scansione)
     ok(await page.locator('[data-ink-save]').isDisabled(), 'Salva deve essere spento senza tratti');
   });
   await t('annotazioni: evidenziatore e penna disegnano tratti; «Annulla» li toglie uno alla volta', async () => {
+    await page.click('[data-ink-hl]');           // lo strumento di partenza è «Evidenzia» sul testo: qui si prova quello a mano libera
     await stroke(0.1, 0.1, 0.8, 0.1); eq(await inkCount(), 1);
     await page.click('[data-ink-pen]'); await page.click('[data-ink-color="#e53935"]');
     await stroke(0.1, 0.5, 0.8, 0.6); eq(await inkCount(), 2);

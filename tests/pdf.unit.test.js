@@ -134,4 +134,57 @@ t('pathOf: precisione scelta (le firme normalizzate hanno bisogno di più decima
   assert.strictEqual(L.pathOf([[0.12345, 0.5]], null, 1e4).split(' ')[0], 'M0.1235');
   assert.strictEqual(L.pathOf([[0.12345, 0.5]]).split(' ')[0], 'M0.12');
 });
+// ---- evidenziazione che segue il testo ----
+// Due righe di corpo 10 su una pagina "a schermo": la matrice ha già l'asse y capovolto (come in pdf.js).
+const mk = (str, x, y, w) => ({ str, width: w, transform: [10, 0, 0, -10, x, y] });
+const hlItems = [mk('Alfa beta gamma', 10, 50, 90), mk('Delta epsilon', 10, 80, 78), mk('', 0, 0, 0), mk('Zeta', 10, 110, 24)];
+const boxes = L.buildBoxes(hlItems, (it) => it.transform);
+t('buildBoxes: salta le voci vuote e senza larghezza', () => assert.strictEqual(boxes.length, 3));
+t('locate: un punto dentro la voce dà la posizione del carattere', () => {
+  const p = L.locate(boxes, 55, 47);          // a metà della prima riga
+  assert.strictEqual(p.bi, 0); assert.strictEqual(p.off, 8);
+});
+t('locate: un punto sotto la riga 2 sceglie la riga 2, non la 3', () => assert.strictEqual(L.locate(boxes, 20, 86).bi, 1));
+t('locate: fuori dalla pagina si aggancia comunque alla voce più vicina', () => {
+  assert.strictEqual(L.locate(boxes, -50, 49).off, 0);
+  assert.strictEqual(L.locate(boxes, 999, 49).off, 15);
+});
+t('selectQuads: dentro una riga si allarga alla parola intera', () => {
+  const q = L.selectQuads(boxes, [40, 47], [60, 47]);   // dentro «beta» fino a metà di «beta»/«gamma»
+  assert.strictEqual(q.length, 1);
+  const xs = q[0].map((p) => p[0]);
+  assert.ok(Math.min(...xs) >= 10 + 90 * 5 / 15 - 0.01 && Math.min(...xs) <= 40, 'inizio sulla parola «beta»');
+  assert.ok(Math.max(...xs) >= 60, 'fine oltre il punto di rilascio');
+});
+t('selectQuads: la fascia sta intorno alla linea di base (sale ~0,92 e scende ~0,22 del corpo)', () => {
+  const q = L.selectQuads(boxes, [12, 47], [90, 47])[0], ys = q.map((p) => p[1]);
+  assert.ok(Math.abs(Math.min(...ys) - (50 - 9.2)) < 0.05); assert.ok(Math.abs(Math.max(...ys) - (50 + 2.2)) < 0.05);
+});
+t('selectQuads: da una riga a un’altra colora la coda della prima e l’inizio della seconda', () => {
+  const q = L.selectQuads(boxes, [60, 47], [30, 77]);
+  assert.strictEqual(q.length, 2);
+});
+t('selectQuads: l’ordine dei due punti non conta', () => {
+  assert.deepStrictEqual(L.selectQuads(boxes, [60, 47], [30, 77]), L.selectQuads(boxes, [30, 77], [60, 47]));
+});
+t('selectQuads: tre righe → tre fasce; la riga di mezzo è intera', () => {
+  const q = L.selectQuads(boxes, [12, 47], [20, 107]);
+  assert.strictEqual(q.length, 3);
+  const w = (qd) => Math.max(...qd.map((p) => p[0])) - Math.min(...qd.map((p) => p[0]));
+  assert.ok(Math.abs(w(q[1]) - 78) < 0.05);
+});
+t('selectQuads: senza testo non produce nulla', () => assert.deepStrictEqual(L.selectQuads([], [0, 0], [5, 5]), []));
+t('selectQuads: testo ruotato di 90° (colonna verticale) resta lungo la scrittura', () => {
+  const rot = [{ str: 'Verticale', width: 45, transform: [0, -10, 10, 0, 100, 200] }];   // scrive verso l'alto
+  const q = L.selectQuads(L.buildBoxes(rot, (it) => it.transform), [100, 190], [100, 170]);
+  assert.strictEqual(q.length, 1);
+  const ys = q[0].map((p) => p[1]), xs = q[0].map((p) => p[0]);
+  assert.ok(Math.max(...ys) - Math.min(...ys) > 4, 'estesa in verticale');
+  assert.ok(Math.max(...xs) - Math.min(...xs) < 15, 'stretta in orizzontale');
+});
+t('quadsPath: un tracciato chiuso per ogni rettangolo', () => {
+  const p = L.quadsPath([[[0, 0], [1, 0], [1, 1], [0, 1]], [[2, 2], [3, 2], [3, 3], [2, 3]]]);
+  assert.strictEqual((p.match(/Z/g) || []).length, 2); assert.ok(p.startsWith('M0 0 L1 0'));
+});
+
 console.log('\n' + n + ' test unitari PDF superati');
