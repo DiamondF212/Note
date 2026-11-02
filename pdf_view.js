@@ -569,6 +569,15 @@
     function moreMenu() {
       A.openSheet(d.name, h('div', null,
         h('button', { class: 'item', 'data-act': 'goto', onclick: async () => { await A.back(); askPage(); } }, h('span', { html: A.I('file', 22) }), 'Vai a pagina…'),
+        h('button', { class: 'item', 'data-act': 'pages', onclick: async () => {
+          await A.back();
+          if (hasChanges()) return A.toast('Prima salva le annotazioni (pulsante «Salva»), poi gestisci le pagine', 4200);
+          if (!N.pdfPages) return A.toast('Gestione pagine non disponibile');
+          N.pdfPages.open(d, A, async () => { // a lavoro finito: chiude questo lettore e lo riapre sul file nuovo
+            await A.back();
+            openPdf(d, A).catch((e) => A.toast('Impossibile riaprire: ' + (e.message || e), 4500));
+          });
+        } }, h('span', { html: A.I('copy', 22) }), 'Gestisci pagine'),
         h('button', { class: 'item', 'data-act': 'tonote', onclick: async () => { await A.back(); toNote(); } }, h('span', { html: A.I('notes', 22) }), 'Salva il testo come nota'),
         h('button', { class: 'item', 'data-act': 'export', onclick: async () => { await A.back(); A.exportFile(d); } }, h('span', { html: A.I('share', 22) }), 'Esporta / condividi')));
     }

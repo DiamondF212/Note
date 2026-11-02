@@ -20,7 +20,7 @@ Struttura delle risposte complesse: 🧠 Analisi e Ragionamento · 🗺️ Piano
 
 ## L'app
 
-«Note» v2.4.0: app personale per note, liste, promemoria, note vocali, strumenti. JavaScript semplice (nessun framework, nessun bundler), PWA + Android tramite Capacitor 7 (`appId it.francesco.lemienote` — NON cambiarlo mai: l'app si aggiornerebbe come app diversa e i dati non si vedrebbero più). Dati in IndexedDB (`mie-note`, versione 2, archivi `notes`, `meta`, `docs`). Funziona offline. **I miei dati devono restare solo sul mio telefono**: nessun invio in rete, nessuna CDN a runtime, tutte le librerie sono dentro l'app.
+«Note» v2.5.0: app personale per note, liste, promemoria, note vocali, strumenti. JavaScript semplice (nessun framework, nessun bundler), PWA + Android tramite Capacitor 7 (`appId it.francesco.lemienote` — NON cambiarlo mai: l'app si aggiornerebbe come app diversa e i dati non si vedrebbero più). Dati in IndexedDB (`mie-note`, versione 2, archivi `notes`, `meta`, `docs`). Funziona offline. **I miei dati devono restare solo sul mio telefono**: nessun invio in rete, nessuna CDN a runtime, tutte le librerie sono dentro l'app.
 
 File principali: `index.html` (carica in ordine db, crypto, export, analysis, audio, drag_drop, tools, docs, pdf_view, app), `app.js` (interfaccia principale, helper `h`, `I`, `ibtn`, `toast`, `openSheet`, `pushLayer`/`back` per il tasto Indietro di Android), `db.js`, `docs.js`, `pdf_view.js` (lettore e annotazioni PDF), `tools.js`, `export.js` (esporta note in PDF/DOCX scritti a mano), `sw.js` (service worker, cache `note-v9`), `scripts/build-www.js` (copia l'app e `vendor/` in `www/`).
 
@@ -31,10 +31,10 @@ Una sezione **Documenti** (voce nel menu laterale) che funzioni come un mini Off
 ## Stato attuale (tutto verificato con test)
 
 **Fatto e funzionante:**
-- Passo 0: repository GitHub privato `DiamondF212/Note` (ramo `main`) con la mia app; costruzione automatica dell'APK con GitHub Actions.
+- Passo 0: repository GitHub privato (ramo `main`; nome attuale `DiamondF212/le-mie-note`, da rinominare a mano in `Note` dalle impostazioni di GitHub perché la sandbox non può) con la mia app; costruzione automatica dell'APK con GitHub Actions.
 - Passo 1: sezione Documenti con archivio locale (importa PDF/Word/Excel con riconoscimento dai primi byte, rinomina, esporta identico all'originale, elimina con conferma, filtro per tipo, nomi unici «Nome (2)»). Migrazione database v1→v2 solo additiva (le note esistenti non si toccano). Registro editor: `N.docs.register(tipo, { open(doc, api), create(api) })`. `api` offre: `lib(nome)`, `save(doc)`, `exportFile(doc)`, `screen(titolo,{onClose})`, `toast`, `h`, `I`, `ibtn`, `openSheet`, `back`, `saveAsNote(titolo, testo)`, `fmtSize`, `fileName`, `uniqueName`, `TYPES`. Aprire un tipo senza editor mostra «editor non ancora disponibile».
 - Librerie in `vendor/` (versioni fisse, vedi `vendor/VERSIONI.txt`): pdf.js 3.11.174 (`vendor/pdfjs/pdf.min.js`, `pdf.worker.min.js`, `cmaps/`, `standard_fonts/`), pdf-lib 1.17.1, @pdf-lib/fontkit 1.1.1, mammoth 1.8.0, ExcelJS 4.4.0 (scelta al posto di SheetJS per le vulnerabilità note). Caricate su richiesta con `api.lib('pdfjs'|'pdflib'|'mammoth'|'exceljs')`.
-- Test: **98 unitari e 123 end-to-end** (Playwright) tutti superati (tools, docs, pdf). Comandi: `npm run test:unit`, `npm run test:e2e`. In sandbox: `NODE_PATH=/opt/node22/lib/node_modules node tests/pdf.e2e.test.js` (e `tests/pdf_sign.e2e.test.js`).
+- Test: **109 unitari e 134 end-to-end** (Playwright) tutti superati (tools, docs, pdf). Comandi: `npm run test:unit`, `npm run test:e2e`. In sandbox: `NODE_PATH=/opt/node22/lib/node_modules node tests/pdf.e2e.test.js` (e `tests/pdf_sign.e2e.test.js`, `tests/pdf_hl.e2e.test.js`, `tests/pdf_pages.e2e.test.js`).
 - APK: GitHub Actions (`.github/workflows/build.yml`) esegue i test e costruisce un APK debug scaricabile da Actions → ultima esecuzione → artefatto `note-apk`. È firmato con una **chiave fissa** (`signing/debug.keystore`, alias `androiddebugkey`, password `android`), così gli aggiornamenti si installano sopra la versione esistente senza perdere le note. Non cambiare mai quella chiave. Prima di aggiornamenti importanti: backup dall'esportazione dell'app.
 - `.github/workflows/vendor.yml` (avvio manuale) riscarica le librerie in `vendor/` e le salva nel repository.
 
@@ -44,11 +44,13 @@ Una sezione **Documenti** (voce nel menu laterale) che funzioni come un mini Off
 
 - **Passo 3c — Evidenziazione che segue il testo (fatto, testato nel browser simulato; non ancora provato sul telefono):** nella barra «Annota» il nuovo strumento **Evidenzia** (ora quello di partenza) colora il testo: si trascina il dito dal primo all'ultimo carattere e gli estremi si allargano alla parola intera; funziona su più righe e su testo ruotato. Ogni selezione è un solo tracciato con più rettangoli (le sovrapposizioni non si scuriscono), si annulla con «Annulla» e «Salva» la scrive nel PDF come riempimento trasparente (il testo sotto resta selezionabile/ricercabile). Il vecchio evidenziatore a mano libera si chiama ora **A mano**. Sui PDF scansione (senza testo) compare un messaggio che suggerisce «A mano». Logica pura: `buildBoxes`, `locate`, `selectQuads`, `quadsPath` in `N.pdfView._logic`. Test: `tests/pdf_hl.e2e.test.js` + 12 unitari. Cache `note-v9`.
 
+- **Passo 4 — Gestione pagine (fatto, testato nel browser simulato; non ancora provato sul telefono):** nel lettore, menu «Altro» → **Gestisci pagine** (`pdf_pages.js`, `N.pdfPages.open(d, A, onDone)`). Griglia di miniature (disegnate solo quando visibili): si tocca per selezionare; pulsanti **Tutte/Nessuna, Ruota 90°, Sposta prima/dopo, Elimina** (con conferma, mai tutte le pagine), **Estrai** (estrae le selezionate in un nuovo PDF, oppure «Dividi in PDF da N pagine»: i nuovi file «Nome (estratto)» / «Nome (parte 1)»… finiscono in Documenti e l'originale non cambia), **Unisci** (aggiunge in fondo le pagine di un altro PDF dell'archivio, segnate «Unita»), **Salva**. Nulla cambia finché non si preme «Salva»; uscendo senza salvare le modifiche si scartano con un avviso. Se nel lettore ci sono annotazioni non salvate, prima va premuto il loro «Salva». Il PDF si ricostruisce con pdf-lib copiando le pagine (una sola copia per PDF di origine). Limite onesto: moduli compilabili, segnalibri e firme digitali del file originale non vengono conservati (testo, immagini e annotazioni sì). Nuove funzioni di `api` in `docs.js`: `listDocs(tipo)`, `getDoc(id)`, `addDoc(tipo, nome, dati)`. Logica pura in `N.pdfPages._logic` (`moveSel`, `rotSel`, `delSel`, `pickSel`, `chunkRanges`, `isChanged`, `buildPdf`). Test: `tests/pdf_pages.unit.test.js` (11) e `tests/pdf_pages.e2e.test.js` (11). Versione 2.5.0, cache `note-v10`.
+
 ## Prossimi passi (uno alla volta, testando ogni volta)
 
 1. ~~Firma e testo nuovo~~ (fatto, passo 3b).
 2. ~~Evidenziazione che segue il testo~~ (fatto, passo 3c).
-3. Gestione pagine (unisci, dividi, ruota, riordina, elimina); poi compilazione moduli; poi correzione testo «copri e riscrivi»; creazione di PDF nuovi.
+3. ~~Gestione pagine~~ (fatto, passo 4). Restano per il PDF: **compilazione moduli** (prossimo), poi correzione testo «copri e riscrivi», poi creazione di PDF nuovi.
 4. Word: editor di testo ricco (contentEditable), apertura .docx con mammoth, salvataggio .docx (si può estendere il writer DOCX già presente in `export.js`), esportazione in PDF.
 5. Excel: griglia a celle con più fogli e formule di base con ExcelJS, apertura e salvataggio .xlsx.
 6. Conversioni note ↔ documenti (le liste diventano tabelle e viceversa). `api.saveAsNote` esiste già.
@@ -65,4 +67,4 @@ Una sezione **Documenti** (voce nel menu laterale) che funzioni come un mini Off
 
 ## Cosa fare subito nella nuova conversazione
 
-Leggi lo zip allegato, conferma di aver capito, poi parti dal primo punto non ancora fatto dei «Prossimi passi» (gestione pagine), seguendo il formato di risposta sopra. Collegati al repository `DiamondF212/Note` se hai accesso a GitHub; altrimenti lavora sullo zip e dimmi come riportare le modifiche.
+Leggi lo zip allegato, conferma di aver capito, poi parti dal primo punto non ancora fatto dei «Prossimi passi» (compilazione moduli PDF), seguendo il formato di risposta sopra. Collegati al repository GitHub (`DiamondF212/Note`, oppure `DiamondF212/le-mie-note` se non è ancora stato rinominato) se hai accesso a GitHub; altrimenti lavora sullo zip e dimmi come riportare le modifiche.

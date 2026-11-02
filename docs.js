@@ -118,6 +118,16 @@
       ctx.pushLayer(close);
       return { el, body, actions, setTitle: (t) => { titleEl.textContent = t; }, close: () => ctx.back() };
     },
+    // Per gli editor che lavorano su più documenti (unire pagine, estrarre pagine…)
+    listDocs(type) { return state.docs.filter((d) => !type || d.type === type).map((d) => ({ id: d.id, name: d.name, size: d.size || 0 })); },
+    getDoc(id) { return N.db.docs.get(id); },
+    async addDoc(type, baseName, data) {
+      const name = uniqueName(baseName, state.docs.filter((d) => d.type === type).map((d) => d.name));
+      const now = Date.now();
+      const d = { id: ctx.uid(), type, name, size: data.byteLength, created: now, updated: now, data };
+      await api.save(d);
+      return d;
+    },
     toast: (m, ms) => ctx.toast(m, ms),
     h: (...a) => ctx.h(...a), I: (...a) => ctx.I(...a), ibtn: (...a) => ctx.ibtn(...a),
     openSheet: (...a) => ctx.openSheet(...a),
