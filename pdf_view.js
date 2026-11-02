@@ -208,6 +208,7 @@
     ins: '<svg class="i" viewBox="0 0 24 24" width="22" height="22"><path d="M4 7V5h10v2M9 5v9M7 14h4"/><path d="M13 20c2-3 3-6 5-6s0 5 3 2"/></svg>',
     sign: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M3 17c2-6 4-9 5-9s0 6 2 6 3-4 4-4 1 3 3 3 2-1 3-2M3 21h18"/></svg>',
     text: '<svg class="i" viewBox="0 0 24 24" width="20" height="20"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>',
+    form: '<svg class="i" viewBox="0 0 24 24" width="22" height="22"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>',
     trash: '<svg class="i" viewBox="0 0 24 24" width="18" height="18"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>',
     edit: '<svg class="i" viewBox="0 0 24 24" width="18" height="18"><path d="M4 20l1-4L16.5 4.5a2 2 0 013 3L8 19l-4 1z"/></svg>'
   };
@@ -290,8 +291,9 @@
       ink.setAttribute('preserveAspectRatio', 'none');
       ink.dataset.page = String(i);
       const ol = h('div', { class: 'pdf-objs' });
-      const el = h('div', { class: 'pdf-page', 'data-page': String(i + 1), role: 'img', 'aria-label': 'Pagina ' + (i + 1) + ' di ' + n }, hl, ink, ol);
-      pages.push({ el, hl, ink, ol, canvas: null, key: null, busy: false, gen: 0, task: null, cs: 1, err: false });
+      const fl = h('div', { class: 'pdf-form' });
+      const el = h('div', { class: 'pdf-page', 'data-page': String(i + 1), role: 'img', 'aria-label': 'Pagina ' + (i + 1) + ' di ' + n }, hl, ink, ol, fl);
+      pages.push({ el, hl, ink, ol, fl, canvas: null, key: null, busy: false, gen: 0, task: null, cs: 1, err: false });
       inner.append(el);
     }
     let tops = [], heights = [];
@@ -538,7 +540,7 @@
       const on = force === undefined ? !sBar.classList.contains('on') : force;
       sBar.classList.toggle('on', on);
       if (on && I.on) toggleInk(false);
-      if (on) toggleIns(false);
+      if (on) { toggleIns(false); toggleForm(false); }
       if (on) { sInput.focus(); sInput.select(); }
       else { sInput.blur(); S.token++; S.q = ''; S.matches = []; S.byPage = new Map(); S.idx = -1; S.searching = ''; setCount(); redrawAllHighlights(); }
     }
@@ -601,6 +603,8 @@
     const ann = pages.map(() => []);          // tratti per pagina, in coordinate della pagina a zoom 1
     const hist = [];                          // ordine di disegno, per «Annulla»
     const I = { on: false, tool: 'txt', color: INK_COLORS[0], saving: false };
+    const formCh = new Map();                 // campi del modulo cambiati: nome → nuovo valore
+    let fSave = null;
     const NS = 'http://www.w3.org/2000/svg';
     const pathEl = (st) => {
       const e = document.createElementNS(NS, 'path');
@@ -641,13 +645,14 @@
       undoBtn.disabled = !hist.length;
       saveBtn.disabled = !hasChanges() || I.saving;
       insSave.disabled = !hasChanges() || I.saving;
+      if (fSave) fSave.disabled = !hasChanges() || I.saving;
     }
-    function hasChanges() { return hist.length > 0 || objs.length > 0; }
+    function hasChanges() { return hist.length > 0 || objs.length > 0 || formCh.size > 0; }
     function toggleInk(force) {
       I.on = force === undefined ? !I.on : force;
       tBar.classList.toggle('on', I.on);
       body.classList.toggle('inking', I.on);
-      if (I.on) { toggleSearch(false); toggleIns(false); }
+      if (I.on) { toggleSearch(false); toggleIns(false); toggleForm(false); }
       paintBar();
     }
     function drawInk(i) {
@@ -763,6 +768,24 @@
       const { PDFDocument, rgb, LineCapStyle, degrees } = window.PDFLib;
       const doc = await PDFDocument.load(d.data.slice(0), { ignoreEncryption: true });
       const ps = doc.getPages();
+      if (formCh.size) {
+        const form = doc.getForm(), F = window.PDFLib, bad = [];
+        for (const [name, v] of formCh) {
+          let f = null;
+          try { f = form.getField(name); } catch (e) { bad.push(name); continue; }
+          try {
+            if (f instanceof F.PDFTextField) { if (v) f.setText(String(v)); else f.setText(undefined); }
+            else if (f instanceof F.PDFCheckBox) { if (v) f.check(); else f.uncheck(); }
+            else if (f instanceof F.PDFRadioGroup) {
+              // alcuni programmi nominano gli stati con l'indice (0, 1…) e tengono i nomi veri in /Opt
+              const opts = f.getOptions(), sv = String(v);
+              if (v) f.select(opts.includes(sv) ? sv : (opts[parseInt(sv, 10)] != null ? opts[parseInt(sv, 10)] : sv)); else f.clear();
+            }
+            else if (f instanceof F.PDFDropdown || f instanceof F.PDFOptionList) { if (v) f.select(String(v)); else f.clear(); }
+          } catch (e) { bad.push(name); }
+        }
+        if (bad.length) throw new Error('campo «' + bad[0] + '» non compilabile (caratteri non supportati?)');
+      }
       for (let i = 0; i < n; i++) {
         if (!ann[i].length || !ps[i]) continue;
         const vp = pageObjs[i].getViewport({ scale: 1 });
@@ -812,7 +835,9 @@
           });
         }
       }
-      const out = await doc.save();
+      // campi del modulo: aspetto ridisegnato con il font incorporato (accenti e lettere europee), non con l'Helvetica base
+      if (formCh.size) doc.getForm().updateFieldAppearances((await fontFor(false)).f);
+      const out = await doc.save({ updateFieldAppearances: false });
       d.data = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
       await A.save(d);
     }
@@ -1092,12 +1117,103 @@
     function toggleIns(force) {
       const on = force === undefined ? !insBar.classList.contains('on') : force;
       insBar.classList.toggle('on', on);
-      if (on) { toggleSearch(false); if (I.on) toggleInk(false); }
+      if (on) { toggleSearch(false); toggleForm(false); if (I.on) toggleInk(false); }
       else if (selId !== null) select(null);
       paintBar();
     }
     scr.actions.insertBefore(btn(SV.ins, () => toggleIns(), 'Firma e testo', { 'data-pdf-insert': '1' }), scr.actions.lastChild);
     paintBar();
+
+    /* ---------- moduli (campi da compilare) ---------- */
+    const fields = [];                        // per pagina: campi compilabili trovati da pdf.js
+    const formInit = new Map(), radios = new Map();
+    let formBuilt = false, formCount = 0;
+    const isFillable = (a) => a && a.subtype === 'Widget' && a.fieldName && !a.readOnly && (a.fieldType === 'Tx' || a.fieldType === 'Ch' || (a.fieldType === 'Btn' && !a.pushButton));
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    function setField(name, v) { if (same(v, formInit.get(name))) formCh.delete(name); else formCh.set(name, v); paintBar(); }
+    function mkField(i, a) {
+      const vp = pageObjs[i].getViewport({ scale: 1 }), b = base[i];
+      const r = vp.convertToViewportRectangle(a.rect);
+      const x = Math.min(r[0], r[2]), y = Math.min(r[1], r[3]), w = Math.abs(r[2] - r[0]), hh = Math.abs(r[3] - r[1]);
+      const place = (el) => { el.style.left = (x / b.w * 100) + '%'; el.style.top = (y / b.h * 100) + '%'; el.style.width = (w / b.w * 100) + '%'; el.style.height = (hh / b.h * 100) + '%'; return el; };
+      const name = a.fieldName, fv = Array.isArray(a.fieldValue) ? a.fieldValue[0] : a.fieldValue;
+      if (a.fieldType === 'Tx') {
+        const multi = !!a.multiLine;
+        const el = h(multi ? 'textarea' : 'input', { class: 'pdf-fld', 'data-fld': name, 'aria-label': name });
+        if (!multi) el.type = 'text';
+        el.value = fv == null ? '' : String(fv);
+        if (a.maxLen) el.maxLength = a.maxLen;
+        el.style.fontSize = 'calc(var(--cs) * ' + (multi ? 12 : Math.max(6, Math.min(16, hh * 0.62))) + 'px)';
+        if (!formInit.has(name)) formInit.set(name, el.value);
+        el.addEventListener('input', () => setField(name, el.value));
+        return place(el);
+      }
+      if (a.fieldType === 'Ch') {
+        const el = h('select', { class: 'pdf-fld', 'data-fld': name, 'aria-label': name });
+        const opts = (a.options || []).map((o) => ({ ex: String(o.exportValue), dv: String(o.displayValue != null ? o.displayValue : o.exportValue) }));
+        el.append(h('option', { value: '' }, ''));
+        for (const o of opts) el.append(h('option', { value: o.dv }, o.dv));
+        const cur = opts.find((o) => o.ex === String(fv) || o.dv === String(fv));
+        el.value = cur ? cur.dv : '';
+        el.style.fontSize = 'calc(var(--cs) * ' + Math.max(6, Math.min(16, hh * 0.62)) + 'px)';
+        if (!formInit.has(name)) formInit.set(name, el.value);
+        el.addEventListener('change', () => setField(name, el.value));
+        return place(el);
+      }
+      if (a.radioButton) {
+        const val = String(a.buttonValue);
+        const el = h('button', { class: 'pdf-fchk rad', 'data-fld': name, 'data-val': val, 'aria-label': name + ': ' + val, 'aria-pressed': 'false' });
+        if (!radios.has(name)) radios.set(name, []);
+        radios.get(name).push({ el, val });
+        if (!formInit.has(name)) formInit.set(name, fv && fv !== 'Off' ? String(fv) : '');
+        const paintR = (cur) => radios.get(name).forEach((q) => { q.el.classList.toggle('on', q.val === cur); q.el.setAttribute('aria-pressed', q.val === cur ? 'true' : 'false'); });
+        el.addEventListener('click', () => { const cur = formCh.has(name) ? formCh.get(name) : formInit.get(name); const nv = cur === val ? '' : val; paintR(nv); setField(name, nv); });
+        place(el);
+        return el;
+      }
+      const el = h('button', { class: 'pdf-fchk', 'data-fld': name, 'aria-label': name, 'aria-pressed': 'false' });
+      const on0 = !!fv && fv !== 'Off';
+      if (!formInit.has(name)) formInit.set(name, on0);
+      el.classList.toggle('on', on0); el.setAttribute('aria-pressed', on0 ? 'true' : 'false');
+      el.addEventListener('click', () => { const nv = !el.classList.contains('on'); el.classList.toggle('on', nv); el.setAttribute('aria-pressed', nv ? 'true' : 'false'); setField(name, nv); });
+      return place(el);
+    }
+    function buildForm() {
+      if (formBuilt) return;
+      formBuilt = true;
+      // i pulsanti di scelta (radio) vanno dipinti dopo che tutto il gruppo esiste
+      fields.forEach((list, i) => { if (list) for (const a of list) pages[i].fl.append(mkField(i, a)); });
+      for (const [name, rs] of radios) { const cur = formInit.get(name); rs.forEach((q) => { q.el.classList.toggle('on', q.val === cur); q.el.setAttribute('aria-pressed', q.val === cur ? 'true' : 'false'); }); }
+    }
+    const fSaveBtn = h('button', { class: 'pdf-savebtn', 'data-form-save': '1', onclick: () => saveInk() });
+    fSaveBtn.textContent = 'Salva';
+    fSave = fSaveBtn;
+    const fBar = h('div', { class: 'pdf-tools pdf-ins' },
+      h('span', { class: 'pdf-hint pdf-fhint', 'data-form-hint': '1' }, 'Tocca i campi per compilarli'),
+      fSaveBtn,
+      h('button', { class: 'ibtn pdf-tb', 'data-form-close': '1', 'aria-label': 'Chiudi', html: SV.x, onclick: () => toggleForm(false) }));
+    scr.el.insertBefore(fBar, body);
+    function toggleForm(force) {
+      const on = force === undefined ? !fBar.classList.contains('on') : force;
+      if (on && !formCount) return;
+      fBar.classList.toggle('on', on);
+      body.classList.toggle('forming', on);
+      if (on) { buildForm(); toggleSearch(false); if (I.on) toggleInk(false); toggleIns(false); }
+      paintBar();
+    }
+    const formBtn = btn(SV.form, () => toggleForm(), 'Compila il modulo', { 'data-pdf-form': '1', hidden: true });
+    scr.actions.insertBefore(formBtn, scr.actions.lastChild);
+    async function scanForms() {
+      for (let i = 0; i < n && !dead; i++) {
+        try {
+          const an = await pageObjs[i].getAnnotations({ intent: 'display' });
+          const list = an.filter(isFillable);
+          if (list.length) { fields[i] = list; formCount += list.length; }
+        } catch (e) { /* pagina senza annotazioni leggibili */ }
+        if (i % 10 === 9) await new Promise((r) => setTimeout(r, 0));
+      }
+      if (!dead && formCount) { formBtn.hidden = false; formBtn.removeAttribute('hidden'); }
+    }
 
     /* ---------- ricorda dove eri arrivato ---------- */
     let saveT = 0, lastPos = null;
@@ -1138,6 +1254,7 @@
     layout();
     if (saved && saved.page > 0) body.scrollTop = tops[Math.min(n - 1, saved.page)] + (saved.frac || 0) * heights[Math.min(n - 1, saved.page)];
     refresh();
+    scanForms();
     return { goPage, setZoom, search: doSearch };
   }
 
