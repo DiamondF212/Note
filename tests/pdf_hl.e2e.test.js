@@ -61,10 +61,14 @@ async function makeScan() { const doc = await PDFDocument.create(); doc.addPage(
   // righe: linea di base a y = 560 - 450 = 110, 140, 170 (dall'alto)
   const quads = () => page.locator('.pdf-ink path.pdf-txthl').count();
   const quadBoxes = () => page.locator('.pdf-ink path.pdf-txthl').evaluateAll((ps) => ps.map((p) => { const b = p.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; }));
+  // pixel col colore dell'evidenziatore giallo (#ffeb3b al 40% su bianco ≈ 255,247,177); le frange colorate dell'antialiasing del testo non contano
   const yellow = (rows) => page.locator('.pdf-page canvas').first().evaluate((c, [r0, r1]) => {
-    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0;
-    for (let y = Math.floor(r0 * c.height); y < Math.floor(r1 * c.height); y++) for (let x = 0; x < c.width; x++) { const i = (y * c.width + x) * 4; if (d[i] > 240 && d[i + 1] > 235 && d[i + 2] > 120 && d[i + 2] < 215) n++; }
-    return n;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; const sample = [];
+    for (let y = Math.floor(r0 * c.height); y < Math.floor(r1 * c.height); y++) for (let x = 0; x < c.width; x++) {
+      const i = (y * c.width + x) * 4;
+      if (d[i] >= 250 && d[i + 1] >= 242 && d[i + 1] <= 252 && d[i + 2] >= 165 && d[i + 2] <= 190) { n++; if (sample.length < 4) sample.push([x, y, d[i], d[i + 1], d[i + 2]].join(',')); }
+    }
+    return { n, sample };
   }, rows);
 
   await t('la barra si apre con «Evidenzia» già scelto', async () => {
@@ -119,8 +123,8 @@ async function makeScan() { const doc = await PDFDocument.create(); doc.addPage(
     eq(await quads(), 0, 'dopo il salvataggio le fasce sono dentro il PDF');
   });
   await t('nel PDF salvato il giallo c’è sul primo e secondo rigo e NON sul terzo', async () => {
-    ok(await yellow([90 / 560, 150 / 560]) > 300, 'giallo mancante sui primi due righi');
-    eq(await yellow([158 / 560, 185 / 560]), 0, 'giallo sul terzo rigo');
+    ok((await yellow([90 / 560, 150 / 560])).n > 300, 'giallo mancante sui primi due righi');
+    const third = await yellow([158 / 560, 185 / 560]); eq(third.n, 0, 'giallo sul terzo rigo, campione x,y,r,g,b: ' + third.sample.join(' | '));
   });
   await t('il testo resta nel PDF dopo l’evidenziazione (non è stato coperto o rasterizzato)', async () => {
     await page.click('[data-pdf-search]'); await page.fill('[data-pdf-q]', 'secondo rigo');
