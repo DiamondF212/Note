@@ -624,3 +624,19 @@ textarea.pdf-fld { padding: 2px 3px; resize: none; line-height: 1.15; }
 .pdf-fchk.rad.on::after { content: ''; width: 55%; height: 55%; background: #111; border-radius: 50%; margin: auto; }
 .pdf-fhint { margin: 0; text-align: left; flex: 1; }
 [data-pdf-form][hidden] { display: none; }
+
+/* ---- Word ---- */
+.word-body { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.word-bar { flex: none; display: flex; align-items: center; gap: 2px; padding: 4px 8px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.word-bar .wbtn { flex: none; min-width: 40px; height: 40px; padding: 0 6px; border-radius: 10px; font-weight: 650; color: var(--ink); display: inline-flex; align-items: center; justify-content: center; }
+.word-bar .wbtn.on { background: var(--accent); color: var(--accent-ink); }
+.word-bar .wbtn[disabled] { opacity: .4; }
+.word-bar .wb { font-weight: 900; } .word-bar .wi { font-style: italic; } .word-bar .wu { text-decoration: underline; } .word-bar .ws { text-decoration: line-through; }
+.word-bar .wbtn svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.word-bar .wsep { flex: none; width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+.word-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.word-doc { min-height: 100%; box-sizing: border-box; padding: 16px 16px calc(45vh + var(--sab)); outline: none; font-size: 16px; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.word-doc h1 { font-size: 1.7em; line-height: 1.25; margin: .6em 0 .3em; } .word-doc h2 { font-size: 1.4em; line-height: 1.25; margin: .6em 0 .3em; } .word-doc h3 { font-size: 1.15em; margin: .6em 0 .3em; }
+.word-doc p { margin: 0 0 .6em; } .word-doc ul, .word-doc ol { margin: 0 0 .6em; padding-left: 1.6em; }
+.word-doc table { border-collapse: collapse; width: 100%; margin: .4em 0 .8em; table-layout: fixed; } .word-doc td, .word-doc th { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; min-width: 36px; }
+.word-doc img { max-width: 100%; height: auto; display: block; margin: .4em 0; }
