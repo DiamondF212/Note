@@ -1452,7 +1452,11 @@
      ===================================================================== */
 
   if (N.docs && N.docs.register) {
-    N.docs.register('pdf', { open: (d, A) => openPdf(d, A) });
+    N.docs.register('pdf', {
+      open: (d, A) => openPdf(d, A),
+      // PDF nuovo (pdf_new.js): finito di creare, si apre subito nel lettore
+      create: (A) => N.pdfNew.create(A, (d) => openPdf(d, A))
+    });
   }
 
   N.pdfView = { _logic: { buildBoxes, locate, selectQuads, quadsPath, fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS, normSignature, textLines, textBaselines, clamp, TEXT_LINE, TEXT_BASE, TEXT_COLORS, nearBox, lineAt, isUpright, coverRect, fixDraft, sampleColors, toHex } };
