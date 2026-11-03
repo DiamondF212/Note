@@ -592,6 +592,9 @@ main#list { padding-top: 8px; }
 .pdf-txtrow { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
 .pdf-sizelbl { min-width: 2.2em; text-align: center; font-weight: 700; }
 .pdf-ins .pdf-hlbtn { background: var(--surface2); }
+.pdf-ins .pdf-hlbtn.on { outline: 2px solid var(--accent); }
+.pdf-cover { position: absolute; pointer-events: none; }
+.pdf-body.fixing { cursor: crosshair; }
 
 /* ===== PDF: gestione pagine ===== */
 .pgm-body { padding: 8px 10px 40px; overflow: auto; background: var(--bg); }

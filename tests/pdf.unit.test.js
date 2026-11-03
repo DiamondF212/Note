@@ -187,4 +187,69 @@ t('quadsPath: un tracciato chiuso per ogni rettangolo', () => {
   assert.strictEqual((p.match(/Z/g) || []).length, 2); assert.ok(p.startsWith('M0 0 L1 0'));
 });
 
+// ---- correzione del testo (copri e riscrivi) ----
+// trasformazione "schermo": [corpo, 0, 0, -corpo, x, y] (y verso il basso, come dopo la vista di pdf.js)
+const fx = (str, x, y, width, fs) => ({ str, width, transform: [fs || 10, 0, 0, -(fs || 10), x, y] });
+const fixBoxes = L.buildBoxes([
+  fx('Totale', 50, 100, 30), fx('da pagare:', 84, 100, 45), fx('120,00', 133, 100, 28),     // una riga in tre voci
+  fx('Colonna lontana', 300, 100, 70),                                                        // stessa linea ma troppo distante
+  fx('Seconda riga', 50, 118, 55)
+], (it) => it.transform);
+t('lineAt: unisce le voci della stessa riga e lascia fuori quelle lontane', () => {
+  const ln = L.lineAt(fixBoxes, 90, 97);
+  assert.strictEqual(ln.text, 'Totale da pagare: 120,00');
+  assert.strictEqual(ln.n, 3);
+  assert.strictEqual(ln.ox, 50); assert.strictEqual(ln.oy, 100); assert.strictEqual(ln.w, 111);
+});
+t('lineAt: toccando la riga sotto prende quella, non la vicina', () => {
+  assert.strictEqual(L.lineAt(fixBoxes, 70, 116).text, 'Seconda riga');
+});
+t('lineAt: lontano da ogni testo → null; nessun testo → null', () => {
+  assert.strictEqual(L.lineAt(fixBoxes, 200, 300), null);
+  assert.strictEqual(L.lineAt([], 10, 10), null);
+});
+t('lineAt: due voci identiche sovrapposte (finto grassetto) contano una volta', () => {
+  const bx = L.buildBoxes([fx('Titolo', 20, 50, 40, 12), fx('Titolo', 20.2, 50, 40, 12)], (it) => it.transform);
+  assert.strictEqual(L.lineAt(bx, 30, 48).text, 'Titolo');
+});
+t('lineAt: spazio tra voci inserito solo se c’è distanza e non c’è già', () => {
+  const bx = L.buildBoxes([fx('ab', 10, 20, 10), fx('cd', 22, 20, 10), fx('ef ', 32, 20, 10), fx('gh', 46, 20, 10)], (it) => it.transform);
+  assert.strictEqual(L.lineAt(bx, 15, 18).text, 'ab cdef gh');
+});
+t('isUpright: orizzontale sì; ruotata o verticale no', () => {
+  assert.ok(L.isUpright(L.lineAt(fixBoxes, 90, 97)));
+  const rot = L.buildBoxes([{ str: 'Verticale', width: 40, transform: [0, 10, -10, 0, 100, 200] }], (it) => it.transform);
+  assert.ok(!L.isUpright(L.lineAt(rot, 95, 190)));
+  assert.ok(!L.isUpright(null));
+});
+t('coverRect e fixDraft: il riquadro copre la riga; il testo nuovo parte dallo stesso punto e corpo', () => {
+  const ln = L.lineAt(fixBoxes, 90, 97), r = L.coverRect(ln), d = L.fixDraft(ln);
+  assert.ok(r.x < 50 && r.x + r.w > 161, 'copre in larghezza');
+  assert.ok(r.y <= 100 - 0.85 * 10 + 0.01 && r.y + r.h >= 100 + 0.22 * 10 - 0.01, 'copre in altezza');
+  assert.strictEqual(d.size, 10); assert.strictEqual(d.x, 50);
+  assert.ok(Math.abs(d.y + d.size * L.TEXT_BASE - 100) < 0.01, 'la linea di base coincide');
+  assert.strictEqual(d.text, 'Totale da pagare: 120,00');
+});
+const mkImg = (w, h, bg, fgBox, fg) => {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const inF = fgBox && x >= fgBox[0] && x < fgBox[2] && y >= fgBox[1] && y < fgBox[3], c = inF ? fg : bg, k = (y * w + x) * 4;
+    data[k] = c[0]; data[k + 1] = c[1]; data[k + 2] = c[2]; data[k + 3] = 255;
+  }
+  return { data, width: w, height: h };
+};
+t('sampleColors: sfondo giallo e testo blu letti dall’immagine', () => {
+  const img = mkImg(100, 40, [255, 249, 196], [30, 15, 70, 25], [30, 102, 245]);
+  const c = L.sampleColors(img, { x: 10, y: 8, w: 80, h: 24 });
+  assert.strictEqual(c.bg, '#fff9c4'); assert.strictEqual(c.fg, '#1e66f5');
+});
+t('sampleColors: pagina bianca senza testo → sfondo bianco, testo null', () => {
+  const c = L.sampleColors(mkImg(60, 30, [255, 255, 255]), { x: 5, y: 5, w: 50, h: 20 });
+  assert.strictEqual(c.bg, '#ffffff'); assert.strictEqual(c.fg, null);
+});
+t('sampleColors: sfondo scuro con testo chiaro; riquadro ai bordi dell’immagine non va in errore', () => {
+  const c = L.sampleColors(mkImg(60, 30, [20, 20, 20], [10, 10, 50, 20], [240, 240, 240]), { x: 0, y: 0, w: 60, h: 30 });
+  assert.strictEqual(c.bg, '#141414'); assert.strictEqual(c.fg, '#f0f0f0');
+});
+
 console.log('\n' + n + ' test unitari PDF superati');

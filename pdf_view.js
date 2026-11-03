@@ -189,6 +189,111 @@
   function textBaselines(o) { return textLines(o.text).map((_, i) => o.y + o.size * (i * TEXT_LINE + TEXT_BASE)); }
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
+  // ---- Correzione del testo esistente («copri e riscrivi») ----
+  // Si tocca una riga: le voci di testo di pdf.js sulla stessa linea di base vengono unite in una riga sola,
+  // la riga viene coperta con un riquadro del colore dello sfondo e sopra si scrive il testo nuovo.
+  const FIX_BELOW = 0.22, FIX_ABOVE = 0.85;   // quanto il riquadro scende sotto / sale sopra la linea di base (in corpi)
+  const FIX_REACH = 0.8;                      // distanza massima del tocco dal testo (in corpi)
+  const FIX_GAP = 0.8;                        // spazio massimo tra due voci della stessa riga (in corpi)
+  // Voce di testo più vicina al punto (x, y) e distanza in corpi.
+  function nearBox(boxes, x, y) {
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i], px = x - b.ox, py = y - b.oy;
+      const lx = px * b.dx + py * b.dy, ly = px * b.ux + py * b.uy;
+      const ex = Math.max(0, -lx, lx - b.w), ey = Math.max(0, -ly - HL_BELOW * b.fh, ly - HL_ABOVE * b.fh);
+      const dd = Math.hypot(ex, ey * 1.5) / b.fh;
+      if (dd < bd) { bd = dd; best = i; }
+    }
+    return best < 0 ? null : { bi: best, d: bd };
+  }
+  // Riga di testo che contiene (o è subito sotto/sopra) il punto toccato; null se non c'è testo vicino.
+  function lineAt(boxes, x, y) {
+    const s = nearBox(boxes, x, y);
+    if (!s || s.d > FIX_REACH) return null;
+    const a = boxes[s.bi], fh = a.fh;
+    const L = [];
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (b.dx * a.dx + b.dy * a.dy < 0.995) continue;                         // altra direzione di scrittura
+      const rx = b.ox - a.ox, ry = b.oy - a.oy;
+      if (Math.abs(rx * a.ux + ry * a.uy) > 0.3 * fh) continue;                // altra linea di base
+      const st = rx * a.dx + ry * a.dy;
+      L.push({ b, st, en: st + b.w, me: i === s.bi });
+    }
+    L.sort((p, q) => p.st - q.st || p.en - q.en);
+    const dup = (p, q) => Math.abs(p.st - q.st) < 0.5 && p.b.str === q.b.str; // stesso testo disegnato due volte (finto grassetto)
+    const U = [];
+    for (const p of L) {
+      const q = U[U.length - 1];
+      if (q && dup(q, p)) { if (p.me) q.me = true; } else U.push(p);
+    }
+    const k = Math.max(0, U.findIndex((p) => p.me));
+    let lo = k, hi = k, end = U[k].en, start = U[k].st;
+    for (let j = k + 1; j < U.length && U[j].st - end <= FIX_GAP * fh; j++) { hi = j; end = Math.max(end, U[j].en); }
+    for (let j = k - 1; j >= 0 && start - U[j].en <= FIX_GAP * fh; j--) { lo = j; start = Math.min(start, U[j].st); }
+    let text = '', prevEnd = null;
+    for (let j = lo; j <= hi; j++) {
+      const p = U[j];
+      if (prevEnd !== null && p.st - prevEnd > 0.12 * fh && !/\s$/.test(text) && !/^\s/.test(p.b.str)) text += ' ';
+      text += p.b.str;
+      prevEnd = Math.max(prevEnd === null ? -Infinity : prevEnd, p.en);
+    }
+    const r = (v) => Math.round(v * 100) / 100;
+    return { text: text.replace(/\s+$/, '').replace(/^\s+/, ''), ox: r(a.ox + a.dx * start), oy: r(a.oy + a.dy * start), dx: a.dx, dy: a.dy, ux: a.ux, uy: a.uy, w: r(end - start), fh, n: hi - lo + 1 };
+  }
+  // Solo le righe orizzontali (come appaiono sullo schermo) si possono correggere.
+  const isUpright = (ln) => !!ln && ln.dx > 0.995 && Math.abs(ln.dy) < 0.05 && ln.uy < -0.995 && Math.abs(ln.ux) < 0.05;
+  // Riquadro che copre la riga (unità pagina, zoom 1).
+  function coverRect(ln) {
+    const pad = Math.max(0.6, 0.06 * ln.fh), r = (v) => Math.round(v * 100) / 100;
+    return { x: r(ln.ox - pad), y: r(ln.oy - FIX_ABOVE * ln.fh), w: r(ln.w + 2 * pad), h: r((FIX_ABOVE + FIX_BELOW) * ln.fh) };
+  }
+  // Testo nuovo che prende il posto della riga: stesso punto di partenza e stessa altezza.
+  function fixDraft(ln) {
+    const size = clamp(Math.round(ln.fh * 10) / 10, 6, 120);
+    return { text: ln.text, size, x: ln.ox, y: Math.round((ln.oy - size * TEXT_BASE) * 100) / 100, rect: coverRect(ln) };
+  }
+  const toHex = (c) => '#' + c.map((v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
+  // Colori letti dal rendering: sfondo = colore prevalente attorno al riquadro `r` (px, coordinate dell'immagine),
+  // testo = colore medio dei pixel più lontani dallo sfondo dentro il riquadro (null se non se ne trovano).
+  function sampleColors(img, r) {
+    const W = img.width, H = img.height, D = img.data, T = 3;
+    const bins = new Map();
+    const x0 = Math.floor(r.x), y0 = Math.floor(r.y), x1 = Math.ceil(r.x + r.w), y1 = Math.ceil(r.y + r.h);
+    const add = (x, y) => {
+      const k = (y * W + x) * 4, key = (D[k] >> 4) << 8 | (D[k + 1] >> 4) << 4 | (D[k + 2] >> 4);
+      const e = bins.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+      e.n++; e.r += D[k]; e.g += D[k + 1]; e.b += D[k + 2];
+      bins.set(key, e);
+    };
+    for (let y = Math.max(0, y0 - T); y < Math.min(H, y1 + T); y++) {
+      const inY = y >= y0 && y < y1;
+      for (let x = Math.max(0, x0 - T); x < Math.min(W, x1 + T); x++) if (!(inY && x >= x0 && x < x1)) add(x, y);
+    }
+    if (!bins.size) {                          // riquadro che occupa tutta l'immagine: vale il colore prevalente al suo interno
+      for (let y = Math.max(0, y0); y < Math.min(H, y1); y++) for (let x = Math.max(0, x0); x < Math.min(W, x1); x++) add(x, y);
+    }
+    let bg = [255, 255, 255], top = 0;
+    for (const e of bins.values()) if (e.n > top) { top = e.n; bg = [e.r / e.n, e.g / e.n, e.b / e.n]; }
+    const far = [];
+    for (let y = Math.max(0, y0); y < Math.min(H, y1); y++) {
+      for (let x = Math.max(0, x0); x < Math.min(W, x1); x++) {
+        const k = (y * W + x) * 4, dr = D[k] - bg[0], dg = D[k + 1] - bg[1], db = D[k + 2] - bg[2], dd = dr * dr + dg * dg + db * db;
+        if (dd > 90 * 90) far.push([dd, D[k], D[k + 1], D[k + 2]]);
+      }
+    }
+    let fg = null;
+    if (far.length >= 3) {
+      far.sort((p, q) => q[0] - p[0]);
+      const m = Math.max(3, Math.ceil(far.length / 4));
+      let sr = 0, sg = 0, sb = 0;
+      for (let i = 0; i < m; i++) { sr += far[i][1]; sg += far[i][2]; sb += far[i][3]; }
+      fg = toHex([sr / m, sg / m, sb / m]);
+    }
+    return { bg: toHex(bg), fg };
+  }
+
   const ZMIN = 0.5, ZMAX = 5;
   const clampZoom = (z) => Math.min(ZMAX, Math.max(ZMIN, Math.round(z * 100) / 100));
 
@@ -801,6 +906,13 @@
           ps[i].drawSvgPath(pathOf(pts, (y) => -y), { x: 0, y: 0, borderColor: rgb(c[0], c[1], c[2]), borderWidth: st.w, borderOpacity: st.op, borderLineCap: LineCapStyle.Round });
         }
       }
+      // riquadri che coprono le righe corrette: prima di tutti i testi, così non nascondono mai un testo nuovo
+      for (const o of objs) {
+        if (!o.cover || !ps[o.page]) continue;
+        const vp = pageObjs[o.page].getViewport({ scale: 1 }), { x, y, w, h: hh } = o.cover.rect, c = hexRgb(o.cover.color);
+        const qs = [[x, y], [x + w, y], [x + w, y + hh], [x, y + hh]].map(([px, py]) => vp.convertToPdfPoint(px, py));
+        ps[o.page].drawSvgPath(quadsPath([qs], (yy) => -yy), { x: 0, y: 0, color: rgb(c[0], c[1], c[2]), opacity: 1, borderWidth: 0 });
+      }
       // firme (tratti scalati nel rettangolo scelto) e testi (font Liberation Sans incorporato, accenti compresi)
       const fonts = {};
       const fontFor = async (bold) => {
@@ -965,6 +1077,7 @@
       const k = objs.indexOf(o);
       if (k >= 0) objs.splice(k, 1);
       o.el.remove();
+      if (o.cover && o.cover.el) o.cover.el.remove();
       if (selId === o.id) selId = null;
       paintBar();
     }
@@ -978,6 +1091,16 @@
       const cy = (body.scrollTop + body.clientHeight / 2 - tops[i]) / p.cs;
       return { i, cx: clamp(cx, 0, base[i].w), cy: clamp(cy, 0, base[i].h) };
     }
+    // riquadro che copre la riga corretta: sta fermo sul testo originale (in percentuale, segue lo zoom)
+    function paintCover(o) {
+      const c = o.cover, b = base[o.page];
+      if (!c.el) { c.el = h('div', { class: 'pdf-cover', 'data-cover': '1' }); pages[o.page].ol.prepend(c.el); }
+      c.el.style.left = (c.rect.x / b.w * 100) + '%';
+      c.el.style.top = (c.rect.y / b.h * 100) + '%';
+      c.el.style.width = (c.rect.w / b.w * 100) + '%';
+      c.el.style.height = (c.rect.h / b.h * 100) + '%';
+      c.el.style.background = c.color;
+    }
     function addObj(o) {
       o.id = ++oid;
       const p = pages[o.page];
@@ -986,10 +1109,13 @@
       objs.push(o);
       bindObj(o);
       fillObj(o);
-      // centra l'oggetto sul punto scelto (misurato davvero, per il testo)
-      const b = base[o.page], wB = o.el.offsetWidth / p.cs, hB = o.el.offsetHeight / p.cs;
-      o.x = clamp(o.cx - wB / 2, 0, Math.max(0, b.w - wB));
-      o.y = clamp(o.cy - hB / 2, 0, Math.max(0, b.h - hB));
+      if (o.cover) paintCover(o);
+      if (o.x == null) {
+        // centra l'oggetto sul punto scelto (misurato davvero, per il testo)
+        const b = base[o.page], wB = o.el.offsetWidth / p.cs, hB = o.el.offsetHeight / p.cs;
+        o.x = clamp(o.cx - wB / 2, 0, Math.max(0, b.w - wB));
+        o.y = clamp(o.cy - hB / 2, 0, Math.max(0, b.h - hB));
+      }
       placeObj(o);
       select(o.id);
       paintBar();
@@ -1063,54 +1189,117 @@
         h('button', { class: 'item danger', 'data-sig-del': '1', onclick: async () => { sigSaved = null; try { await N.db.setMeta('signature', null); } catch (e) { /* ignora */ } await A.back(); A.toast('Firma eliminata'); } }, h('span', { html: SV.trash }), 'Elimina la firma salvata')));
     }
 
-    /* testo */
-    function textSheet(existing) {
-      const dr = existing ? { text: existing.text, size: existing.size, color: existing.color, bold: existing.bold } : { text: '', size: 14, color: TEXT_COLORS[0], bold: false };
+    /* testo (nuovo, modificato, o riscritto al posto di una riga esistente) */
+    function textSheet(existing, fix) {
+      const cv = existing ? existing.cover : fix ? { auto: fix.bg, color: fix.bg } : null;
+      const dr = existing ? { text: existing.text, size: existing.size, color: existing.color, bold: existing.bold }
+        : fix ? { text: fix.draft.text, size: fix.draft.size, color: fix.fg || TEXT_COLORS[0], bold: false }
+        : { text: '', size: 14, color: TEXT_COLORS[0], bold: false };
+      const palette = TEXT_COLORS.includes(dr.color) ? TEXT_COLORS : [dr.color, ...TEXT_COLORS];
+      const bgNow = { c: cv ? cv.color : null };
       const ta = h('textarea', { class: 'pdf-ta', rows: 3, placeholder: 'Scrivi qui il testo', 'data-txt-input': '1', 'aria-label': 'Testo da aggiungere' });
       ta.value = dr.text;
       const sizeLbl = h('span', { class: 'pdf-sizelbl', 'data-txt-size': '1' }, String(dr.size));
       const boldBtn = h('button', { class: 'pdf-tb pdf-hlbtn', 'data-txt-bold': '1', 'aria-label': 'Grassetto', style: { fontWeight: '800' } }, 'G');
-      const cols = TEXT_COLORS.map((c) => h('button', { class: 'pdf-col', 'data-txt-color': c, 'aria-label': 'Colore ' + c, style: { background: c } }));
-      const done = h('button', { class: 'pdf-savebtn pdf-wide', 'data-txt-done': '1' }, existing ? 'Fatto' : 'Aggiungi');
+      const cols = palette.map((c) => h('button', { class: 'pdf-col', 'data-txt-color': c, 'aria-label': 'Colore ' + c, style: { background: c } }));
+      const bgOpts = cv ? [...new Set([cv.auto, '#ffffff'])] : [];
+      const bgBtns = bgOpts.map((c) => h('button', { class: 'pdf-col', 'data-fix-bg': c, 'aria-label': 'Sfondo ' + c, style: { background: c } }));
+      const done = h('button', { class: 'pdf-savebtn pdf-wide', 'data-txt-done': '1' }, existing ? 'Fatto' : fix ? 'Applica' : 'Aggiungi');
       const paint = () => {
         sizeLbl.textContent = String(dr.size);
         boldBtn.classList.toggle('on', dr.bold);
         cols.forEach((b) => b.classList.toggle('on', b.dataset.txtColor === dr.color));
+        bgBtns.forEach((b) => b.classList.toggle('on', b.dataset.fixBg === bgNow.c));
         ta.style.fontWeight = dr.bold ? '700' : '400';
         ta.style.color = dr.color;
       };
       const setSize = (v) => { dr.size = clamp(Math.round(v), 6, 120); paint(); };
       boldBtn.addEventListener('click', () => { dr.bold = !dr.bold; paint(); });
       cols.forEach((b) => b.addEventListener('click', () => { dr.color = b.dataset.txtColor; paint(); }));
+      bgBtns.forEach((b) => b.addEventListener('click', () => { bgNow.c = b.dataset.fixBg; paint(); }));
       done.addEventListener('click', async () => {
         dr.text = ta.value;
         if (!dr.text.trim()) { ta.focus(); return; }
         await A.back();
         if (existing) {
           Object.assign(existing, dr);
+          if (existing.cover && bgNow.c) { existing.cover.color = bgNow.c; paintCover(existing); }
           fillObj(existing);
           select(existing.id);
+        } else if (fix) {
+          addObj({ kind: 'text', page: fix.page, x: fix.draft.x, y: fix.draft.y, text: dr.text, size: dr.size, color: dr.color, bold: dr.bold, cover: { rect: fix.draft.rect, color: bgNow.c, auto: fix.bg } });
+          A.toast('Riga corretta: sposta il testo se serve, poi premi «Salva»', 3600);
         } else {
           const sp = centerSpot();
           addObj({ kind: 'text', page: sp.i, cx: sp.cx, cy: sp.cy, text: dr.text, size: dr.size, color: dr.color, bold: dr.bold });
         }
       });
-      A.openSheet(existing ? 'Modifica il testo' : 'Testo nuovo', h('div', null, ta,
+      A.openSheet(existing ? 'Modifica il testo' : fix ? 'Correggi il testo' : 'Testo nuovo', h('div', null,
+        fix ? h('p', { class: 'pdf-hint', 'data-fix-hint': '1' }, 'Il testo vecchio viene coperto, ma resta nel file sotto il riquadro: non è una cancellazione sicura.') : null,
+        ta,
         h('div', { class: 'pdf-txtrow' },
           h('button', { class: 'pdf-tb pdf-hlbtn', 'data-txt-smaller': '1', 'aria-label': 'Più piccolo', onclick: () => setSize(dr.size - 2) }, 'A−'),
           sizeLbl,
           h('button', { class: 'pdf-tb pdf-hlbtn', 'data-txt-bigger': '1', 'aria-label': 'Più grande', onclick: () => setSize(dr.size + 2) }, 'A+'),
           boldBtn, ...cols),
+        cv ? h('div', { class: 'pdf-txtrow' }, h('span', { class: 'pdf-hint', style: { margin: 0 } }, 'Sfondo che copre il testo vecchio'), ...bgBtns) : null,
         done));
       paint();
       setTimeout(() => { try { ta.focus(); } catch (e) { /* ignora */ } }, 60);
     }
+
+    /* correzione del testo esistente: si tocca una riga, si riscrive */
+    let fixOn = false, fixBusy = false, fixToast = 0;
+    const fixBtn = h('button', { class: 'pdf-hlbtn', 'data-ins-fix': '1', 'aria-label': 'Correggi il testo esistente', onclick: () => toggleFix() }, 'Correggi');
+    function toggleFix(force) {
+      fixOn = force === undefined ? !fixOn : force;
+      fixBtn.classList.toggle('on', fixOn);
+      body.classList.toggle('fixing', fixOn);
+      if (fixOn) A.toast('Tocca la riga di testo da correggere', 3000);
+    }
+    // colori di sfondo e di testo letti dalla pagina disegnata (se non è disponibile: bianco e nero)
+    function pageColors(i, rect) {
+      const c = pages[i].canvas, none = { bg: '#ffffff', fg: null };
+      if (!c) return none;
+      try {
+        const f = c.width / base[i].w, m = 4;
+        const sx = Math.max(0, Math.floor(rect.x * f) - m), sy = Math.max(0, Math.floor(rect.y * f) - m);
+        const ex = Math.min(c.width, Math.ceil((rect.x + rect.w) * f) + m), ey = Math.min(c.height, Math.ceil((rect.y + rect.h) * f) + m);
+        if (ex <= sx || ey <= sy) return none;
+        const img = c.getContext('2d').getImageData(sx, sy, ex - sx, ey - sy);
+        return sampleColors(img, { x: rect.x * f - sx, y: rect.y * f - sy, w: rect.w * f, h: rect.h * f });
+      } catch (e) { return none; }
+    }
+    inner.addEventListener('click', async (e) => {
+      if (!fixOn || fixBusy || !e.target.closest || e.target.closest('.pdf-obj')) return;
+      const pg = e.target.closest('.pdf-page');
+      const i = pg ? +pg.dataset.page - 1 : -1;
+      if (!(i >= 0 && pages[i])) return;
+      const r = pages[i].el.getBoundingClientRect();
+      const x = (e.clientX - r.left) / Math.max(1, r.width) * base[i].w, y = (e.clientY - r.top) / Math.max(1, r.height) * base[i].h;
+      const say = (m) => { if (Date.now() - fixToast > 2500) { fixToast = Date.now(); A.toast(m, 4200); } };
+      fixBusy = true;
+      try {
+        const bx = await boxesOf(i);
+        if (dead || !fixOn) return;
+        const ln = lineAt(bx, x, y);
+        if (!ln || !ln.text) { say(bx.length ? 'Qui non c’è testo: tocca più vicino a una riga' : 'Questa pagina non ha testo da correggere (forse è una scansione)'); return; }
+        if (!isUpright(ln)) { say('Questa riga è inclinata o verticale: si correggono solo righe orizzontali'); return; }
+        const draft = fixDraft(ln), col = pageColors(i, draft.rect);
+        toggleFix(false);
+        textSheet(null, { page: i, draft, bg: col.bg, fg: col.fg });
+      } catch (err) {
+        console.error(err);
+        A.toast('Impossibile leggere il testo di questa pagina', 3500);
+      } finally { fixBusy = false; }
+    });
 
     // barra «Inserisci»
     const insSave = h('button', { class: 'pdf-savebtn', 'data-ins-save': '1', onclick: () => saveInk() }, 'Salva');
     const insBar = h('div', { class: 'pdf-tools pdf-ins' },
       h('button', { class: 'pdf-hlbtn', 'data-ins-sig': '1', 'aria-label': 'Firma', onclick: () => signatureMenu() }, 'Firma'),
       h('button', { class: 'pdf-hlbtn', 'data-ins-text': '1', 'aria-label': 'Aggiungi testo', onclick: () => textSheet(null) }, 'Testo'),
+      fixBtn,
       insSave,
       h('button', { class: 'ibtn pdf-tb', 'data-ins-close': '1', 'aria-label': 'Chiudi', html: SV.x, onclick: () => toggleIns(false) }));
     scr.el.insertBefore(insBar, body);
@@ -1118,7 +1307,7 @@
       const on = force === undefined ? !insBar.classList.contains('on') : force;
       insBar.classList.toggle('on', on);
       if (on) { toggleSearch(false); toggleForm(false); if (I.on) toggleInk(false); }
-      else if (selId !== null) select(null);
+      else { if (selId !== null) select(null); toggleFix(false); }
       paintBar();
     }
     scr.actions.insertBefore(btn(SV.ins, () => toggleIns(), 'Firma e testo', { 'data-pdf-insert': '1' }), scr.actions.lastChild);
@@ -1266,6 +1455,6 @@
     N.docs.register('pdf', { open: (d, A) => openPdf(d, A) });
   }
 
-  N.pdfView = { _logic: { buildBoxes, locate, selectQuads, quadsPath, fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS, normSignature, textLines, textBaselines, clamp, TEXT_LINE, TEXT_BASE, TEXT_COLORS } };
+  N.pdfView = { _logic: { buildBoxes, locate, selectQuads, quadsPath, fold, normQuery, buildPage, plainText, findAll, partsFor, pageAt, visibleRange, clampZoom, thinPoints, pathOf, hexRgb, INK_TOOLS, INK_COLORS, normSignature, textLines, textBaselines, clamp, TEXT_LINE, TEXT_BASE, TEXT_COLORS, nearBox, lineAt, isUpright, coverRect, fixDraft, sampleColors, toHex } };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.pdfView;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));
