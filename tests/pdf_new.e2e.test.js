@@ -28,7 +28,7 @@ const near = (a, b, m) => ok(Math.abs(a - b) < 0.5, (m || '') + ' atteso ' + b +
   page.on('dialog', (d) => d.accept());
 
   await page.goto(base); await page.waitForSelector('#list');
-  await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+  await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
 
   // immagini di prova generate nel browser: larga rossa (con trasparenza a sinistra), alta blu, e un file non valido
   const png = (w, h, color, alphaLeft) => page.evaluate(async ([w, h, color, alphaLeft]) => {

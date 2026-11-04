@@ -370,8 +370,16 @@
       h('header', { class: 'top', id: 'top' }),
       h('div', { class: 'chips hidden', id: 'chips' }),
       h('main', { id: 'list' }),
+      h('nav', { class: 'dock', id: 'dock', 'aria-label': 'Sezioni' },
+        h('button', { 'data-dock': 'notes', onclick: () => { setFilter({}); const l = $('#list'); if (l) l.scrollTo({ top: 0, behavior: 'smooth' }); }, html: I('notes', 22) + 'Note' }),
+        h('button', { 'data-dock': 'tools', onclick: () => openTools(), html: I('tools', 22) + 'Strumenti' }),
+        h('button', { 'data-dock': 'docs', onclick: () => openDocs(), html: I('file', 22) + 'Documenti' })),
       h('button', { class: 'fab', id: 'fab', 'aria-label': 'Nuova nota', onclick: fabTap, html: I('plus', 28) })
     );
+    // con la tastiera aperta (ricerca) il dock e il «+» si nascondono per non coprire la lista
+    const topEl = $('#top');
+    topEl.addEventListener('focusin', (e) => { if (e.target.matches('input')) document.body.classList.add('typing'); });
+    topEl.addEventListener('focusout', () => document.body.classList.remove('typing'));
   }
 
   function renderTop() {
@@ -474,6 +482,7 @@
     if (S.sel.has(id)) S.sel.delete(id); else S.sel.add(id);
     renderTop();
     renderList();
+    syncDock();
   }
 
   function renderList() {
@@ -505,8 +514,22 @@
     renderTop();
     renderChips();
     renderList();
+    syncDock();
+  }
+
+  function syncDock() {
     const fab = $('#fab');
-    if (fab) fab.classList.toggle('hidden', S.sel.size > 0 || S.filter.type === 'trash' || S.filter.type === 'archive');
+    const noFab = S.sel.size > 0 || S.filter.type === 'trash' || S.filter.type === 'archive';
+    if (fab) fab.classList.toggle('hidden', noFab);
+    const dock = $('#dock');
+    if (dock) {
+      dock.classList.toggle('hidden', S.sel.size > 0);
+      dock.classList.toggle('full', noFab);
+      const onNotes = S.filter.type === 'all' && !S.filter.folder;
+      const nb = dock.querySelector('[data-dock="notes"]');
+      nb.classList.toggle('on', onNotes);
+      if (onNotes) nb.setAttribute('aria-current', 'page'); else nb.removeAttribute('aria-current');
+    }
   }
 
   function toggleView() {
@@ -1171,12 +1194,9 @@
     const item = (icon, label, on, fn, n) => h('button', { class: 'item' + (on ? ' on' : ''), onclick: fn }, h('span', { html: I(icon, 22) }), label, n != null ? h('span', { class: 'n' }, n) : null);
     dr.append(
       h('h2', null, 'Note'),
-      item('notes', 'Tutte le note', f.type === 'all' && !f.folder, () => go({}), count((n) => !n.hidden && !n.trashed && !n.archived)),
       item('bell', 'Promemoria', f.type === 'reminders', () => go({ type: 'reminders' }), count((n) => !n.hidden && !n.trashed && n.reminder)),
       item('notes', 'Panoramica personale', false, async () => { await back(); openDashboard(); }),
       item('calendar', 'Calendario', false, async () => { await back(); openCalendar(); }),
-      item('tools', 'Strumenti', false, async () => { await back(); openTools(); }),
-      item('file', 'Documenti', false, async () => { await back(); openDocs(); }),
       item('edit', 'Nota di oggi', false, async () => { await back(); openToday(); })
     );
     dr.append(h('div', { class: 'sec' }, 'Cartelle'));

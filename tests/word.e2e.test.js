@@ -52,7 +52,7 @@ async function makeFixture() {
   page.on('dialog', (d) => d.accept());
 
   await page.goto(base); await page.waitForSelector('#list');
-  await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+  await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
 
   const ed = '[data-word-editor]';
   const docs = () => page.evaluate(() => N.docs._state.docs.map((d) => ({ id: d.id, name: d.name, type: d.type, size: d.size, origin: d.origin })));

@@ -45,7 +45,7 @@ async function makeFixture() {
   page.on('dialog', (d) => d.accept());
 
   await page.goto(base); await page.waitForSelector('#list');
-  await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+  await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
 
   const docs = () => page.evaluate(() => N.docs._state.docs.map((d) => ({ id: d.id, name: d.name, type: d.type, size: d.size, origin: d.origin })));
   const byName = async (n) => (await docs()).find((d) => d.name === n);
@@ -217,7 +217,7 @@ async function makeFixture() {
   await t('Il file salvato si riapre identico dopo ricarica dell’app', async () => {
     await closeEditor();
     await page.goto('about:blank'); await page.goto(base); await page.waitForSelector('#list');
-    await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+    await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
     await page.locator('.docrow:has-text("Nuovo foglio") .docmain').click(); await page.waitForSelector('.xl-grid .xl-c');
     eq(await page.locator('.xl-tab[data-sheet="0"]').textContent(), 'Conti');
     eq(await txt('A1'), 'Mele'); eq(await txt('B1'), '20,00 €'); eq(await txt('B3'), '22,50 €');

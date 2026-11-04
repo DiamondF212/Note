@@ -40,7 +40,7 @@ async function makePdf(rotate) {
   page.on('dialog', (d) => d.accept());
 
   await page.goto(base); await page.waitForSelector('#list');
-  await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+  await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
   await page.click('.docs-plus'); await page.click('.sheet [data-import]');
   await page.locator('input[data-docs-input]').setInputFiles([
     { name: 'Modulo.pdf', mimeType: 'application/pdf', buffer: PDF },

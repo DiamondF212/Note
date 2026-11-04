@@ -39,6 +39,8 @@ jobs:
           mkdir -p ~/.android
           cp signing/debug.keystore ~/.android/debug.keystore
       - run: npx cap add android
+      - name: Icona dell'app (launcher Android)
+        run: cp -r icone-launcher/res/. android/app/src/main/res/
       - name: Permesso per allarmi esatti (timer)
         run: |
           f=android/app/src/main/AndroidManifest.xml
