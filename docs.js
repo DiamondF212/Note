@@ -249,8 +249,9 @@
   }
 
   function init(c) { ctx = c; }
+  const ensure = () => load(); // carica l'elenco dei documenti (serve per i nomi unici quando si salva da fuori della sezione)
   function register(type, editor) { editors[type] = editor; }
 
-  N.docs = { init, open, register, api, _state: state, _logic: { detectType, stripExt, cleanName, fileName, fmtSize, uniqueName, TYPES } };
+  N.docs = { init, open, register, ensure, api, _state: state, _logic: { detectType, stripExt, cleanName, fileName, fmtSize, uniqueName, TYPES } };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.docs;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));

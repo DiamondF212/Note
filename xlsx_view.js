@@ -354,6 +354,13 @@
       A.openSheet('Altro', h('div', null,
         row('xlsx', 'share', 'Esporta .xlsx', 'Salva e condividi il file Excel', async () => { await save(); A.exportFile(await A.getDoc(target.id)); }),
         row('note', 'notes', 'Salva il foglio come nota', 'Testo con le colonne separate da tabulazioni', () => { const t = X.sheetText(model, si, calc); if (!t) return A.toast('Il foglio è vuoto'); A.saveAsNote(target.name + ' — ' + sh().name, t); }),
+        row('list', 'list', 'Crea una lista da colonna', 'Dalla selezione o dalla colonna della cella; con «Fatto» + voce spunta le fatte', () => {
+          const g = range();
+          const items = N.convert.itemsFromCells(model, si, single() ? { r1: 0, r2: sh().rows - 1, c1: sel.c, c2: sel.c } : { r1: g.r1, r2: g.r2, c1: g.c1, c2: g.c2 }, X);
+          if (!items.length) return A.toast('Nessuna voce da trasformare in lista');
+          A.saveAsNote(sh().name, '', items);
+          A.toast('Lista creata con ' + items.length + (items.length === 1 ? ' voce' : ' voci'), 3200);
+        }),
         row('newsheet', 'plus', 'Nuovo foglio', null, () => addSheet()),
         row('rename', 'edit', 'Rinomina foglio', sh().name, () => renameSheet()),
         row('delsheet', 'trash', 'Elimina foglio', null, () => deleteSheet(), 'danger')));

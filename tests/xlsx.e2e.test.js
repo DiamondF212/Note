@@ -226,9 +226,9 @@ async function makeFixture() {
 
   await t('Esce con modifiche non salvate → salvataggio automatico (anche con la cella ancora in modifica)', async () => {
     await page.click(cell('A1')); await page.click(cell('A1')); await page.fill(inp, 'Banane'); // non confermato
-    const before = (await byName('Nuovo foglio di calcolo')).size;
+    const before = await updated('Nuovo foglio di calcolo');
     await closeEditor();
-    await page.waitForFunction((b) => N.docs._state.docs.find((d) => d.name === 'Nuovo foglio di calcolo').size !== b, before);
+    await page.waitForFunction((b) => N.docs._state.docs.find((d) => d.name === 'Nuovo foglio di calcolo').updated !== b, before);
     eq((await readBack((await byName('Nuovo foglio di calcolo')).id)).Conti.A1.v, 'Banane');
   });
 

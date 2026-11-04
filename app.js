@@ -902,8 +902,27 @@
       const txt = notes.map(N.exp.notePlain).join('\n\n');
       try { if (navigator.share) await navigator.share({ title: notes[0].title || 'Nota', text: txt }); else { await navigator.clipboard.writeText(txt); toast('Testo copiato negli appunti'); } } catch (e) {}
     };
+    // Salva una copia dentro «Documenti» (Word/Excel restano modificabili lì; PDF si apre nel lettore)
+    const toDocs = async (type) => {
+      if (hasPrivate && !confirm('Il documento non sarà protetto da password. Continuare?')) return;
+      await back();
+      try {
+        N.docs.init(docsCtx()); await N.docs.ensure();
+        const A = N.docs.api;
+        let data;
+        if (type === 'docx') data = await N.wordView.buildDocx(N.convert.noteToWord(notes));
+        else if (type === 'pdf') data = await N.exp.makePDF(notes).arrayBuffer();
+        else { await A.lib('exceljs'); data = await N.xlsxCore.buildXlsx(window.ExcelJS, N.convert.noteToSheets(notes, N.xlsxCore)); }
+        const d = await A.addDoc(type, one ? (notes[0].title || 'Nota').slice(0, 60) : 'Note', data);
+        if (type !== 'pdf') { d.origin = 'note'; await A.save(d); }
+        toast('Salvato in Documenti: «' + d.name + '»', 3600);
+      } catch (e) { console.error(e); toast('Impossibile creare il documento: ' + (e.message || e), 4500); }
+    };
     const row = (icon, label, sub, fn) => h('button', { class: 'item', onclick: fn }, h('span', { html: I(icon, 22) }), h('span', null, label, h('small', null, sub)));
     box.append(
+      row('file', 'Documenti → Word', 'Copia modificabile nella sezione Documenti', () => toDocs('docx')),
+      row('file', 'Documenti → Excel', 'Liste in colonne «Fatto» / «Voce», un foglio per nota', () => toDocs('xlsx')),
+      row('file', 'Documenti → PDF', 'Copia PDF nella sezione Documenti', () => toDocs('pdf')),
       row('file', 'PDF', 'Documento pronto da stampare o inviare', () => doIt('pdf')),
       row('file', 'Word (.docx)', 'Modificabile con Word, Google Documenti, LibreOffice', () => doIt('docx')),
       row('text', 'Markdown (.md)', 'Testo con formattazione semplice', () => doIt('md')),
@@ -1126,9 +1145,10 @@
     return {
       h, I, ibtn, toast, openSheet, pushLayer, back, download, fmtDate, uid,
       // crea una nota vera a partire dal testo di un documento
-      saveAsNote: (title, text) => {
+      saveAsNote: (title, text, items) => {
         const now = Date.now();
-        const n = normalize({ id: uid(), kind: 'text', title: String(title || '').slice(0, 80), body: text || '', created: now, updated: now });
+        const list = Array.isArray(items) && items.length;
+        const n = normalize(Object.assign({ id: uid(), kind: list ? 'list' : 'text', title: String(title || '').slice(0, 80), body: list ? '' : text || '', created: now, updated: now }, list ? { items: items.map((i) => ({ t: String(i.t), done: !!i.done })) } : {}));
         S.notes.push(n);
         persist(n);
         if ($('#list')) renderAll();
