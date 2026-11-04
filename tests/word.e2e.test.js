@@ -17,7 +17,7 @@ const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQV
 
 // documento Word "vero" creato con la libreria docx (solo per i test): titolo, formati, elenchi, tabella, immagine, intestazione
 async function makeFixture() {
-  const D = require(process.env.DOCX_PATH || '/usr/local/lib/node_modules_global/docx');
+  const D = require(process.env.DOCX_PATH || 'docx');
   const doc = new D.Document({
     numbering: { config: [{ reference: 'n', levels: [{ level: 0, format: 'decimal', text: '%1.', alignment: D.AlignmentType.START }] }] },
     sections: [{

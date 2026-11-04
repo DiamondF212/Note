@@ -15,6 +15,7 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm run test:unit
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer poppler-utils
       - run: npx playwright install --with-deps chromium
       - run: npm install --no-save playwright
       - run: npm run test:e2e
