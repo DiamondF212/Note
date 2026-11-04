@@ -115,10 +115,9 @@ const ZIP = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(60, 1)]);
     await page.waitForFunction(() => document.querySelectorAll('.docrow').length === 3);
     ok(!/Lettera/.test(await page.locator('.docs-list').innerText()));
   });
-  await t('aprire un documento senza editor avvisa invece di rompersi', async () => {
+  await t('aprire un documento illeggibile (file finto) avvisa invece di rompersi', async () => {
     await page.locator('.docrow:has-text("Conti") .docmain').click();
-    await page.waitForSelector('.toast');
-    ok(/non è ancora disponibile|Impossibile/.test(await page.locator('.toast').innerText()));
+    await page.waitForSelector('.toast:has-text("Impossibile")');
   });
   await t('il tasto Indietro chiude la sezione e le note sono intatte', async () => {
     await page.goBack(); await page.waitForSelector('.docs-screen', { state: 'detached' });
@@ -133,7 +132,8 @@ const ZIP = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(60, 1)]);
     });
     for (const k of Object.keys(r)) eq(r[k], 'ok', k + ': ');
   });
-  ok(errors.length === 0, 'errori in console: ' + errors.join(' | '));
+  const real = errors.filter((e) => !/Corrupted zip|end of central directory|file Excel non leggibile/i.test(e)); // errori attesi dal file Excel finto
+  ok(real.length === 0, 'errori in console: ' + real.join(' | '));
   await ctx.close(); await browser.close(); server.close();
   console.log('\n' + passed + ' superati, ' + failed + ' falliti');
   process.exit(failed ? 1 : 0);
