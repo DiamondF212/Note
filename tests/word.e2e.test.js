@@ -61,7 +61,6 @@ async function makeFixture() {
   const html = () => page.locator(ed).evaluate((e) => e.innerHTML);
   const w = (k) => page.click('.word-bar [data-w="' + k + '"]');
   const closeEditor = async () => { await page.goBack(); await page.waitForSelector('.docs-screen'); await page.waitForTimeout(500); };
-  const waitSaved = (name) => page.waitForFunction((n) => N.docs._state.docs.some((d) => d.name === n && d.size > 1000), name);
   const htmlOf = async (id) => { const b = await bytesOf(id); return page.evaluate(async (a) => (await mammoth.convertToHtml({ arrayBuffer: new Uint8Array(a).buffer }, { styleMap: ['u => u', 'strike => s'] })).value, Array.from(b)); };
   const unz = (buf, name) => { const f = path.join(tmp, name); fs.writeFileSync(f, buf); const dir = f + '_x'; fs.rmSync(dir, { recursive: true, force: true }); cp.execFileSync('python3', ['-c', 'import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', f, dir]); return { f, dir }; };
 
@@ -86,7 +85,8 @@ async function makeFixture() {
     await page.locator(ed + ' td').first().click(); await page.keyboard.type('X1');
     const h = await html();
     ok(/<h1>Verbale/.test(h) && /<strong>forte|<b>forte/.test(h) && /<em>obliquo|<i>obliquo/.test(h) && /<ul>/.test(h) && /<ol>/.test(h), h);
-    await page.click('.word-save'); await waitSaved('Nuovo documento');
+    const u0 = await page.evaluate(() => N.docs._state.docs.find((d) => d.name === 'Nuovo documento').updated);
+    await page.click('.word-save'); await page.waitForFunction((u) => N.docs._state.docs.find((d) => d.name === 'Nuovo documento').updated !== u, u0); // il documento nuovo pesa già >1000 byte: si attende che «updated» cambi
     const out = await htmlOf((await byName('Nuovo documento')).id);
     ok(/<h1>Verbale àè€<\/h1>/.test(out), out);
     ok(/<strong>forte<\/strong>/.test(out) && /<em>obliquo<\/em>/.test(out), out);
