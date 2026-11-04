@@ -50,14 +50,14 @@ const ZIP = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(60, 1)]);
     eq(info.folders[0], 'Casa');
   });
 
-  const openDocs = async () => { await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen'); };
+  const openDocs = async () => { await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen'); };
   const importFiles = async (files) => {
     await page.click('.docs-plus'); await page.click('.sheet [data-import]');
     const input = page.locator('input[data-docs-input]');
     await input.setInputFiles(files);
   };
 
-  await t('la voce «Documenti» è nel menu e apre una schermata vuota', async () => {
+  await t('«Documenti» nel dock in basso apre una schermata vuota', async () => {
     await openDocs();
     eq(await page.locator('.docs-empty').count(), 1);
     eq(await page.locator('.ds-title').innerText(), 'Documenti');

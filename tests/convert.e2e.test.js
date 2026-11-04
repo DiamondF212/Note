@@ -71,7 +71,7 @@ const ok = (c, m) => { if (!c) throw new Error(m || 'condizione falsa'); };
 
   await t('I tre documenti compaiono in Documenti e il Word/Excel creato dalla nota si salva sul posto', async () => {
     await closeNote();
-    await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+    await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
     eq(await page.locator('.docrow').count(), 3);
     await page.locator('.docrow:has-text("Da fare"):has-text("Excel") .docmain').click(); await page.waitForSelector('.xl-grid .xl-c');
     await page.click('.xl-c[data-r="3"][data-c="1"]'); await page.click('.xl-c[data-r="3"][data-c="1"]');

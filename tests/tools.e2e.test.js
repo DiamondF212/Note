@@ -32,8 +32,7 @@ const ok = (c, m) => { if (!c) throw new Error(m || 'condizione falsa'); };
   };
   const openTools = async (page, tab) => {
     if (!(await page.locator('.tools-sheet').count())) {
-      await page.click('button[aria-label="Menu"]');
-      await page.click('.drawer .item:has-text("Strumenti")');
+      await page.click('.dock button:has-text("Strumenti")');
       await page.waitForSelector('.tools-sheet');
     }
     if (tab) await page.click('.tools-tab[data-tab="' + tab + '"]');
@@ -44,7 +43,7 @@ const ok = (c, m) => { if (!c) throw new Error(m || 'condizione falsa'); };
   /* ---------- apertura e navigazione ---------- */
   let { ctx, page } = await mk();
   await page.goto(base); await page.waitForSelector('#list');
-  await t('la voce «Strumenti» è nel menu laterale e apre il pannello', async () => {
+  await t('«Strumenti» nel dock in basso apre il pannello', async () => {
     await openTools(page);
     eq(await page.locator('.tools-tab').count(), 4);
     ok(await page.locator('.tools-sheet h3').innerText() === 'Strumenti');

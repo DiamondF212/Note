@@ -45,7 +45,7 @@ async function makeScan() { // pagina senza testo (come una scansione)
   page.on('dialog', (d) => { if (d.type() === 'prompt') d.accept(page.__promptAnswer || 'x'); else d.accept(); });
 
   await page.goto(base); await page.waitForSelector('#list');
-  await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+  await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
   await page.click('.docs-plus'); await page.click('.sheet [data-import]');
   await page.locator('input[data-docs-input]').setInputFiles([
     { name: 'Lungo.pdf', mimeType: 'application/pdf', buffer: PDF12 },
@@ -144,7 +144,7 @@ async function makeScan() { // pagina senza testo (come una scansione)
   });
   await t('doppio tocco: porta lo zoom a 2,5× e un secondo doppio tocco torna a 1×', async () => {
     await page.goto('about:blank'); await page.goto(base); await page.waitForSelector('#list');
-    await page.click('button[aria-label="Menu"]'); await page.click('.drawer .item:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
+    await page.click('.dock button:has-text("Documenti")'); await page.waitForSelector('.docs-screen');
     await openDoc('Lungo');
     await page.waitForSelector('.pdf-page canvas');
     const w = await pageWidth();
@@ -303,7 +303,7 @@ async function makeScan() { // pagina senza testo (come una scansione)
   await t('offline: dopo un primo uso, il lettore si apre anche senza rete', async () => {
     await p2.goto(base); await p2.waitForSelector('#list');
     await p2.evaluate(() => navigator.serviceWorker.ready);
-    await p2.click('button[aria-label="Menu"]'); await p2.click('.drawer .item:has-text("Documenti")'); await p2.waitForSelector('.docs-screen');
+    await p2.click('.dock button:has-text("Documenti")'); await p2.waitForSelector('.docs-screen');
     await p2.click('.docs-plus'); await p2.click('.sheet [data-import]');
     await p2.locator('input[data-docs-input]').setInputFiles([{ name: 'Lungo.pdf', mimeType: 'application/pdf', buffer: PDF12 }]);
     await p2.waitForSelector('.docrow');
@@ -312,7 +312,7 @@ async function makeScan() { // pagina senza testo (come una scansione)
     await p2.waitForTimeout(500);
     await ctx2.setOffline(true);
     await p2.goto('about:blank'); await p2.goto(base); await p2.waitForSelector('#list');
-    await p2.click('button[aria-label="Menu"]'); await p2.click('.drawer .item:has-text("Documenti")'); await p2.waitForSelector('.docs-screen');
+    await p2.click('.dock button:has-text("Documenti")'); await p2.waitForSelector('.docs-screen');
     await p2.locator('.docmain').click(); await p2.waitForSelector('.pdf-page canvas');
     ok(await nonBlank_(p2), 'pagina vuota offline');
   });
