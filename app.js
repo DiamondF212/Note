@@ -269,10 +269,10 @@
   }
   window.addEventListener('popstate', () => {
     const depth = (history.state && history.state.l) || 0;
-    while (layers.length > depth) {
-      const c = layers.pop();
-      try { c(); } catch (e) { console.error(e); }
-    }
+    // prima si tolgono tutti i livelli, poi si chiudono: un livello può registrarne un altro mentre si chiude
+    const closing = [];
+    while (layers.length > depth) closing.push(layers.pop());
+    closing.forEach((c) => { try { c(); } catch (e) { console.error(e); } });
     const rs = waiters;
     waiters = [];
     rs.forEach((r) => r());
@@ -347,6 +347,29 @@
     renderAll();
     const s = $('#q');
     if (s) s.value = S.filter.q;
+  }
+  /* Livello «home»: se c'è una selezione, una ricerca o un filtro (cestino, archivio, cartella, tag…)
+     il tasto Indietro li toglie uno alla volta, invece di chiudere l'app. */
+  let homeLayer = null;
+  function peelHome() {
+    if (S.sel.size) S.sel.clear();
+    else if (S.filter.q) S.filter.q = '';
+    else Object.assign(S.filter, { type: 'all', folder: null, tag: null, q: '' });
+    renderAll(); // se resta qualcosa da togliere, syncHome registra un nuovo livello
+    const s = $('#q');
+    if (s) s.value = S.filter.q;
+  }
+  function syncHome() {
+    const f = S.filter;
+    const need = S.sel.size > 0 || !!f.q || !!f.tag || !!f.folder || f.type !== 'all';
+    if (need && !homeLayer) {
+      const mine = () => { if (homeLayer !== mine) return; homeLayer = null; peelHome(); };
+      homeLayer = mine;
+      pushLayer(mine);
+    } else if (!need && homeLayer && layers[layers.length - 1] === homeLayer) {
+      homeLayer = null; // già tornati alla home da soli: si toglie il livello senza altri effetti
+      history.back();
+    }
   }
   const hasContent = (n) => !!((n.title || '').trim() || (n.body || '').trim() || (n.items || []).some((i) => i.t.trim()) || n.audio);
 
@@ -485,9 +508,11 @@
     syncDock();
   }
 
+  let lastListKey = null;
   function renderList() {
     const host = $('#list');
     if (!host) return;
+    syncHome();
     host.innerHTML = '';
     const list = visible();
     const f = S.filter;
@@ -499,7 +524,11 @@
       host.append(h('div', { class: 'empty' }, h('div', { html: I(f.type === 'vault' ? 'lock' : 'notes', 56) }), msg));
       return;
     }
-    const g = h('div', { class: 'grid' + (S.settings.view === 'list' ? ' one' : '') });
+    // l'animazione d'ingresso delle schede parte solo quando cambia la sezione, non a ogni tasto o selezione
+    const key = f.type + '|' + (f.folder || '') + '|' + (f.tag || '') + '|' + S.settings.view;
+    const still = key === lastListKey;
+    lastListKey = key;
+    const g = h('div', { class: 'grid' + (S.settings.view === 'list' ? ' one' : '') + (still ? ' still' : '') });
     list.forEach((n) => g.append(card(n)));
     host.append(g);
     if (N.dragDrop) N.dragDrop.initDragAndDrop(g, (ids) => {

@@ -690,3 +690,23 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 .dock button:active { transform: scale(.94); }
 .dock button.on { color: var(--accent); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent) 9%, transparent));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 0 22px color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* ===== Prestazioni su Android: niente sfocature in tempo reale, animazioni più brevi =====
+   backdrop-filter obbliga la GPU a ricalcolare lo sfondo a ogni frame (dock, barra, pannelli):
+   sui telefoni medi è la causa principale degli scatti. Si usano superfici piene. */
+.top { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.dock { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 10px 24px rgba(0,0,0,.35); }
+:root[data-theme="light"] .dock { background: var(--surface); box-shadow: 0 8px 22px rgba(54,43,26,.16), 0 1px 4px rgba(54,43,26,.1); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]):not([data-theme="light"]) .dock { background: var(--surface); box-shadow: 0 8px 22px rgba(54,43,26,.16), 0 1px 4px rgba(54,43,26,.1); } }
+.sheet, .drawer { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.sheet { box-shadow: 0 -6px 24px rgba(0,0,0,.28); animation-duration: .3s; }
+.drawer { animation-duration: .26s; }
+.scrim { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.fabs button, .toast { background: var(--surface2); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.ed-tools { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.tools-alarm { backdrop-filter: none; -webkit-backdrop-filter: none; }
+/* schede: l'ingresso si anima solo all'apertura di una sezione e solo per le prime, mai durante ricerca o selezione */
+.card { animation-duration: .3s; }
+.grid.still .card, .grid .card:nth-child(n+13) { animation: none; }
+/* il pannello e il menu si muovono solo con la GPU */
+.sheet, .drawer { will-change: transform; }
