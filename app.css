@@ -809,3 +809,14 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 @media (prefers-reduced-motion: reduce) {
   .workout-exercise-card, .workout-set-done, .workout-day-card { animation: none; transition: none; }
 }
+
+/* Grafici progressi esercizio (workouts.js) */
+.workout-progress h4.wk-chart-title { margin: 16px 0 6px; font-size: .95rem; color: var(--ink); }
+.wk-chart-wrap { padding: 10px 8px 4px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.wk-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.wk-chart .wk-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 4; }
+.wk-chart .wk-tick, .wk-chart .wk-x { fill: var(--muted); font-size: 10px; }
+.wk-chart .wk-value { fill: var(--ink); font-size: 11px; font-weight: 600; }
+.wk-chart .wk-line { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.wk-chart .wk-dot { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.wk-chart .wk-dot.last { fill: var(--accent); }

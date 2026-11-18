@@ -70,6 +70,7 @@
     calendar: '<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M8 3v4M16 3v4"/>',
     tools: '<path d="M14.5 6.5a4 4 0 005 5l-8.8 8.8a2.1 2.1 0 01-3-3z"/><path d="M14.5 6.5l3-3 3 3-3 3"/>',
     dumbbell: '<path d="M6 12h12M4 9v6M20 9v6M2 10v4M22 10v4"/>',
+    chart: '<path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/>',
     ruler: '<rect x="2.5" y="8" width="19" height="8" rx="1.5"/><path d="M6 8v3M10 8v4M14 8v3M18 8v4"/>',
     percent: '<path d="M18 5L6 19"/><circle cx="7.5" cy="7.5" r="2.5"/><circle cx="16.5" cy="16.5" r="2.5"/>',
     timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 1.5M9.5 3h5M12 3v3"/>',

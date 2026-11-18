@@ -52,4 +52,38 @@ t('la normalizzazione conserva le schede e crea raccolte vuote quando mancano', 
   assert.deepStrictEqual(p.sessions, []);
 });
 
+t('lo storico usa la serie più pesante completata di ogni sessione, in ordine di tempo', () => {
+  const prog = { sessions: [
+    { id: 'a', completedAt: 2000, exercises: [{ exerciseId: 'x', sets: [
+      { reps: 8, kg: 50, done: true }, { reps: 6, kg: 60, done: true }, { reps: 10, kg: 99, done: false }] }] },
+    { id: 'b', completedAt: 1000, exercises: [{ exerciseId: 'x', sets: [{ reps: 10, kg: 40, done: true }] }] },
+    { id: 'c', completedAt: 3000, exercises: [{ exerciseId: 'y', sets: [{ reps: 5, kg: 20, done: true }] }] }
+  ] };
+  assert.deepStrictEqual(L.exerciseHistory(prog, 'x'), [
+    { t: 1000, kg: 40, reps: 10 }, { t: 2000, kg: 60, reps: 6 }
+  ]);
+  assert.deepStrictEqual(L.exerciseHistory(prog, 'assente'), []);
+  assert.deepStrictEqual(L.exerciseHistory({ sessions: [] }, 'x'), []);
+});
+t('a parità di carico vince la serie con più ripetizioni', () => {
+  const prog = { sessions: [{ id: 'a', completedAt: 1, exercises: [{ exerciseId: 'x', sets: [
+    { reps: 5, kg: 80, done: true }, { reps: 8, kg: 80, done: true }] }] }] };
+  assert.strictEqual(L.exerciseHistory(prog, 'x')[0].reps, 8);
+});
+t('il grafico SVG è valido, escapa il titolo e gestisce un solo punto', () => {
+  const pts = [{ label: '1 nov', kg: 40, reps: 10 }, { label: '2 nov', kg: 60, reps: 6 }];
+  const svg = L.lineChartSvg(pts, 'kg', 'Panca <b>"x"</b>');
+  assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>'));
+  assert.ok(svg.includes('aria-label="Panca &lt;b&gt;&quot;x&quot;&lt;/b&gt;"'));
+  assert.ok(svg.includes('<polyline'));
+  assert.strictEqual((svg.match(/<circle/g) || []).length, 2);
+  const one = L.lineChartSvg([pts[0]], 'reps', 'T');
+  assert.ok(!one.includes('<polyline'));
+  assert.strictEqual((one.match(/<circle/g) || []).length, 1);
+});
+t('il grafico con valori uguali non produce scale degeneri', () => {
+  const svg = L.lineChartSvg([{ label: 'a', kg: 50, reps: 8 }, { label: 'b', kg: 50, reps: 8 }], 'kg', 'T');
+  assert.ok(!/NaN|Infinity/.test(svg));
+});
+
 console.log('\n' + n + ' test Allenamenti superati');

@@ -65,6 +65,54 @@
       : { day: 'numeric', month: 'short' });
   }
 
+  // Storico di un esercizio: per ogni sessione completata tiene la serie più pesante (kg e ripetizioni).
+  function exerciseHistory(program, exerciseId) {
+    const out = [];
+    ((program && program.sessions) || []).forEach((s) => {
+      const ex = (s.exercises || []).find((e) => e.exerciseId === exerciseId);
+      const done = ex ? (ex.sets || []).filter((x) => x && x.done && Number.isFinite(Number(x.kg))) : [];
+      if (!done.length) return;
+      const best = done.reduce((a, b) => {
+        const ka = Number(a.kg), kb = Number(b.kg);
+        return kb > ka || (kb === ka && Number(b.reps) > Number(a.reps)) ? b : a;
+      });
+      out.push({ t: Number(s.completedAt) || Number(s.startedAt) || 0, kg: Number(best.kg) || 0, reps: Number(best.reps) || 0 });
+    });
+    return out.sort((a, b) => a.t - b.t);
+  }
+  function escAttr(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function fmtNum(v) { return String(Math.round(Number(v) * 10) / 10).replace('.', ','); }
+  // Grafico SVG a linea. points = [{ label, kg, reps }], key = 'kg' | 'reps'. Le sessioni sono distanziate in modo uniforme.
+  function lineChartSvg(points, key, title) {
+    const W = 320, H = 150, L = 40, R = 16, T = 14, B = 26;
+    const n = points.length;
+    const vals = points.map((p) => Number(p[key]) || 0);
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const pad = Math.max(1, (max - min) * 0.15);
+    const lo = Math.max(0, min - pad);
+    const hi = Math.max(max + pad, lo + 1);
+    const x = (i) => (n === 1 ? (L + W - R) / 2 : L + i * (W - L - R) / (n - 1));
+    const y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+    const grid = [hi, (hi + lo) / 2, lo].map((v) => {
+      const yy = y(v).toFixed(1);
+      return '<line class="wk-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '"/>' +
+        '<text class="wk-tick" x="' + (L - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + fmtNum(v) + '</text>';
+    }).join('');
+    const coords = vals.map((v, i) => [x(i), y(v)]);
+    const line = n > 1 ? '<polyline class="wk-line" points="' + coords.map((c) => c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ') + '"/>' : '';
+    const dots = coords.map((c, i) => '<circle class="wk-dot' + (i === n - 1 ? ' last' : '') + '" cx="' + c[0].toFixed(1) + '" cy="' + c[1].toFixed(1) + '" r="' + (i === n - 1 ? 5 : 3.5) + '"/>').join('');
+    const lastC = coords[n - 1];
+    const value = '<text class="wk-value" x="' + lastC[0].toFixed(1) + '" y="' + (lastC[1] - 10).toFixed(1) + '" text-anchor="' + (n === 1 ? 'middle' : 'end') + '">' + fmtNum(vals[n - 1]) + '</text>';
+    const xLabels = n > 1
+      ? '<text class="wk-x" x="' + L + '" y="' + (H - 6) + '" text-anchor="start">' + escAttr(points[0].label) + '</text>' +
+        '<text class="wk-x" x="' + (W - R) + '" y="' + (H - 6) + '" text-anchor="end">' + escAttr(points[n - 1].label) + '</text>'
+      : '<text class="wk-x" x="' + x(0) + '" y="' + (H - 6) + '" text-anchor="middle">' + escAttr(points[0].label) + '</text>';
+    return '<svg class="wk-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + escAttr(title) + '">' +
+      grid + line + dots + value + xLabels + '</svg>';
+  }
+
   async function load() {
     state.program = normalizeProgram(await N.db.workouts.get(STORE_ID));
   }
@@ -438,6 +486,26 @@
       catch (e) { onSaveError(e); }
     }
   }
+  function openProgress(dayId, exerciseId) {
+    const day = dayById(dayId);
+    const ex = day && day.exercises.find((e) => e.id === exerciseId);
+    if (!ex) return;
+    const history = exerciseHistory(state.program, ex.id).map((p) => Object.assign({ label: fmtDate(p.t) }, p));
+    const body = ctx.h('div', { class: 'workout-progress' });
+    if (!history.length) {
+      body.append(ctx.h('p', { class: 'hint' }, 'Ancora nessun dato. Completa almeno una serie in una sessione per vedere i progressi.'));
+    } else {
+      const last = history[history.length - 1];
+      body.append(ctx.h('p', { class: 'hint' }, history.length + (history.length === 1 ? ' sessione registrata' : ' sessioni registrate') + ' · ultimo: ' + fmtKg(last.kg) + ' kg × ' + last.reps));
+      if (history.length === 1) body.append(ctx.h('p', { class: 'hint' }, 'Completa un’altra sessione per vedere l’andamento nel tempo.'));
+      body.append(ctx.h('h4', { class: 'wk-chart-title' }, 'Carico massimo (kg)'),
+        ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(history, 'kg', 'Carico massimo in kg di ' + ex.name) }));
+      body.append(ctx.h('h4', { class: 'wk-chart-title' }, 'Ripetizioni'),
+        ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(history, 'reps', 'Ripetizioni di ' + ex.name) }));
+      body.append(ctx.h('p', { class: 'hint' }, 'Per ogni sessione viene mostrata la serie più pesante completata.'));
+    }
+    ctx.openSheet(ex.name, body);
+  }
   function dayOptions(id) {
     const day = dayById(id);
     if (!day) return;
@@ -453,6 +521,7 @@
     if (!ex) return;
     let sheet;
     sheet = ctx.openSheet(ex.name, ctx.h('div', null,
+      ctx.h('button', { class: 'item', 'data-workout-progress': '1', onclick: async () => { await sheet.close(); openProgress(dayId, ex.id); } }, ctx.h('span', { html: ctx.I('chart', 20) }), 'Vedi progressi'),
       ctx.h('button', { class: 'item', onclick: async () => { await sheet.close(); openExerciseForm(dayId, ex); } }, ctx.h('span', { html: ctx.I('edit', 20) }), 'Modifica obiettivo'),
       ctx.h('button', { class: 'item danger', onclick: async () => { await sheet.close(); confirmDeleteExercise(day, ex); } }, ctx.h('span', { html: ctx.I('trash', 20) }), 'Rimuovi esercizio')
     ));
@@ -495,7 +564,7 @@
     }
   }
 
-  const _logic = { cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
+  const _logic = { cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.workouts;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));

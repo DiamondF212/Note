@@ -108,6 +108,25 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' atteso «' 
     eq(await page.locator('[data-workout-history]').count(), 1);
     ok(await page.locator('.workout-history-row').innerText().then((x) => x.includes('2 serie')));
   });
+  await t('registra una seconda sessione e mostra i grafici dei progressi per esercizio', async () => {
+    await page.goto('about:blank'); await page.goto(base); await openWorkouts();
+    await page.locator('[data-workout-open-day]').first().click();
+    await page.waitForSelector('[data-workout-start]');
+    await page.click('[data-workout-start]');
+    await page.waitForSelector('[data-set-reps]');
+    await page.locator('[data-set-reps]').nth(0).fill('6');
+    await page.locator('[data-set-kg]').nth(0).fill('55');
+    await page.locator('[data-set-done]').nth(0).click();
+    await page.click('[data-workout-finish]');
+    await page.waitForFunction(() => window.N.workouts._state.program.sessions.length === 2);
+    await page.locator('.workout-exercise-more').first().click();
+    await page.click('[data-workout-progress]');
+    await page.waitForSelector('.wk-chart');
+    eq(await page.locator('.wk-chart').count(), 2);
+    ok(await page.locator('.workout-progress').innerText().then((x) => x.includes('2 sessioni registrate')));
+    await page.goBack();
+    await page.waitForSelector('.wk-chart', { state: 'detached' });
+  });
   await t('crea anche una routine personale senza giorno fisso', async () => {
     await page.goBack(); await page.waitForSelector('.workout-screen');
     await page.locator('.workout-add-day').click();
