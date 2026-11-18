@@ -19,7 +19,8 @@ const ZIP = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(60, 1)]);
 (async () => {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://localhost:' + server.address().port + '/';
-  const browser = await chromium.launch();
+  const executablePath = process.env.CHROMIUM_PATH || (fs.existsSync('/repl/tools/bin/chromium') ? '/repl/tools/bin/chromium' : undefined);
+  const browser = await chromium.launch(executablePath ? { executablePath, args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {});
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: 'it-IT', serviceWorkers: 'block', acceptDownloads: true });
   const page = await ctx.newPage(); page.setDefaultTimeout(6000);
   const errors = [];
@@ -28,7 +29,7 @@ const ZIP = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(60, 1)]);
   page.on('dialog', (d) => { if (d.type() === 'prompt') d.accept(page.__promptAnswer || 'x'); else d.accept(); });
 
   /* ---------- migrazione del database: le note vecchie devono sopravvivere ---------- */
-  await t('migrazione: un archivio versione 1 con una nota passa alla 2 senza perdere nulla', async () => {
+  await t('migrazione: un archivio versione 1 con una nota passa alla 3 senza perdere nulla', async () => {
     await page.goto(base + 'icon.svg');
     await page.evaluate(() => new Promise((res, rej) => {
       const r = indexedDB.open('mie-note', 1);
@@ -46,7 +47,7 @@ const ZIP = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(60, 1)]);
       return { notes, v, folders: window.__app.S.folders };
     });
     ok(info.notes.includes('Nota storica'), 'la nota storica è sparita: ' + info.notes);
-    eq(info.v.version, 2); ok(info.v.stores.includes('docs'), 'manca l’archivio docs');
+     eq(info.v.version, 3); ok(info.v.stores.includes('docs'), 'manca l’archivio docs'); ok(info.v.stores.includes('workouts'), 'manca l’archivio workouts');
     eq(info.folders[0], 'Casa');
   });
 

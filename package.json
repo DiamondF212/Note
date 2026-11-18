@@ -5,8 +5,8 @@
   "description": "App personale per note offline",
   "scripts": {
     "build": "node scripts/build-www.js",
-    "test:unit": "node tests/tools.unit.test.js && node tests/docs.unit.test.js && node tests/pdf.unit.test.js && node tests/pdf_pages.unit.test.js && node tests/pdf_new.unit.test.js && node tests/word_core.unit.test.js && node tests/xlsx_core.unit.test.js && node tests/convert.unit.test.js",
-    "test:e2e": "node tests/tools.e2e.test.js && node tests/dock.e2e.test.js && node tests/back.e2e.test.js && node tests/docs.e2e.test.js && node tests/pdf.e2e.test.js && node tests/pdf_sign.e2e.test.js && node tests/pdf_hl.e2e.test.js && node tests/pdf_pages.e2e.test.js && node tests/pdf_form.e2e.test.js && node tests/pdf_fix.e2e.test.js && node tests/pdf_new.e2e.test.js && node tests/word.e2e.test.js && node tests/xlsx.e2e.test.js && node tests/convert.e2e.test.js",
+    "test:unit": "node tests/tools.unit.test.js && node tests/docs.unit.test.js && node tests/workouts.unit.test.js && node tests/pdf.unit.test.js && node tests/pdf_pages.unit.test.js && node tests/pdf_new.unit.test.js && node tests/word_core.unit.test.js && node tests/xlsx_core.unit.test.js && node tests/convert.unit.test.js",
+    "test:e2e": "node tests/tools.e2e.test.js && node tests/dock.e2e.test.js && node tests/workouts.e2e.test.js && node tests/back.e2e.test.js && node tests/docs.e2e.test.js && node tests/pdf.e2e.test.js && node tests/pdf_sign.e2e.test.js && node tests/pdf_hl.e2e.test.js && node tests/pdf_pages.e2e.test.js && node tests/pdf_form.e2e.test.js && node tests/pdf_fix.e2e.test.js && node tests/pdf_new.e2e.test.js && node tests/word.e2e.test.js && node tests/xlsx.e2e.test.js && node tests/convert.e2e.test.js",
     "android:add": "cap add android",
     "android:sync": "npm run build && cap sync android",
     "android:open": "cap open android"

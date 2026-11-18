@@ -1,5 +1,5 @@
 /* Archivio locale su IndexedDB: funziona offline e resta sul dispositivo.
-   Versione 2: aggiunge l'archivio "docs" per i documenti (PDF, Word, Excel).
+       Versione 3: aggiunge gli archivi "docs" e "workouts" in modo additivo.
    L'aggiornamento è solo additivo: le note e le impostazioni esistenti non vengono toccate. */
 (function (N) {
   'use strict';
@@ -8,12 +8,13 @@
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((resolve, reject) => {
-      const r = indexedDB.open('mie-note', 2);
+      const r = indexedDB.open('mie-note', 3);
       r.onupgradeneeded = () => {
         const d = r.result;
         if (!d.objectStoreNames.contains('notes')) d.createObjectStore('notes', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'k' });
         if (!d.objectStoreNames.contains('docs')) d.createObjectStore('docs', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('workouts')) d.createObjectStore('workouts', { keyPath: 'id' });
       };
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
@@ -57,6 +58,14 @@
       get: (id) => run('docs', 'readonly', (s) => s.get(id)),
       put: (d) => run('docs', 'readwrite', (s) => s.put(d)),
       del: (id) => run('docs', 'readwrite', (s) => s.delete(id))
+    },
+
+    /* Schede e sessioni di allenamento: solo archivio locale, senza richieste di rete. */
+    workouts: {
+      all: () => run('workouts', 'readonly', (s) => s.getAll()),
+      get: (id) => run('workouts', 'readonly', (s) => s.get(id)),
+      put: (w) => run('workouts', 'readwrite', (s) => s.put(w)),
+      del: (id) => run('workouts', 'readwrite', (s) => s.delete(id))
     }
   };
 })((window.N = window.N || {}));

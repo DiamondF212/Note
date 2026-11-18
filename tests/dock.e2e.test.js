@@ -1,4 +1,4 @@
-// Test end-to-end del dock in basso (Note · Strumenti · Documenti). Esecuzione: node tests/dock.e2e.test.js
+// Test end-to-end del dock in basso. Esecuzione: node tests/dock.e2e.test.js
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const root = path.join(__dirname, '..');
@@ -16,7 +16,8 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' atteso «' 
 (async () => {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://localhost:' + server.address().port + '/';
-  const browser = await chromium.launch();
+  const executablePath = process.env.CHROMIUM_PATH || (fs.existsSync('/repl/tools/bin/chromium') ? '/repl/tools/bin/chromium' : undefined);
+  const browser = await chromium.launch(executablePath ? { executablePath, args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {});
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: 'it-IT', serviceWorkers: 'block' });
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
@@ -25,7 +26,7 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' atteso «' 
 
   await t('il dock mostra Note, Strumenti, Documenti e «Note» è la voce attiva', async () => {
     const labels = await page.locator('#dock button').allInnerTexts();
-    eq(labels.join('|'), 'Note|Strumenti|Documenti');
+    eq(labels.join('|'), 'Note|Strumenti|Allenamenti|Documenti');
     ok(await page.locator('#dock button[data-dock="notes"].on').count() === 1, 'Note non attiva');
   });
   await t('il dock sta in basso, accanto al «+», senza sovrapporsi', async () => {
@@ -40,9 +41,11 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' atteso «' 
     for (const keep of ['Promemoria', 'Calendario', 'Panoramica personale', 'Nota di oggi', 'Archivio', 'Cestino']) ok(txt.some((x) => x.includes(keep)), keep + ' manca');
     await page.goBack(); await page.waitForSelector('.drawer', { state: 'detached' });
   });
-  await t('«Strumenti» e «Documenti» aprono le rispettive schermate e il dock torna al ritorno', async () => {
+  await t('«Strumenti», «Allenamenti» e «Documenti» aprono le rispettive schermate', async () => {
     await page.click('#dock button[data-dock="tools"]'); await page.waitForSelector('.tools-sheet');
     await page.goBack(); await page.waitForSelector('.tools-sheet', { state: 'detached' });
+    await page.click('#dock button[data-dock="workouts"]'); await page.waitForSelector('.workout-screen');
+    await page.goBack(); await page.waitForSelector('.workout-screen', { state: 'detached' });
     await page.click('#dock button[data-dock="docs"]'); await page.waitForSelector('.docs-screen');
     await page.goBack(); await page.waitForSelector('.docs-screen', { state: 'detached' });
     ok(await page.locator('#dock').isVisible(), 'dock non visibile');
