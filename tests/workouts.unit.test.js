@@ -86,4 +86,23 @@ t('il grafico con valori uguali non produce scale degeneri', () => {
   assert.ok(!/NaN|Infinity/.test(svg));
 });
 
+t('reorderById riordina secondo gli id senza modificare la lista originale', () => {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const out = L.reorderById(list, ['c', 'a', 'b'], (x) => x.id);
+  assert.deepStrictEqual(out.map((x) => x.id), ['c', 'a', 'b']);
+  assert.deepStrictEqual(list.map((x) => x.id), ['a', 'b', 'c']);
+  assert.strictEqual(out[0], list[2]);
+});
+t('reorderById non perde elementi: id sconosciuti ignorati, mancanti in coda, duplicati preservati', () => {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.deepStrictEqual(L.reorderById(list, ['zzz', 'c'], (x) => x.id).map((x) => x.id), ['c', 'a', 'b']);
+  assert.deepStrictEqual(L.reorderById(list, [], (x) => x.id).map((x) => x.id), ['a', 'b', 'c']);
+  assert.deepStrictEqual(L.reorderById(list, ['b', 'b', 'a'], (x) => x.id).map((x) => x.id), ['b', 'a', 'c']);
+  const dup = [{ id: 'a', n: 1 }, { id: 'a', n: 2 }, { id: 'b', n: 3 }];
+  const out = L.reorderById(dup, ['b'], (x) => x.id);
+  assert.strictEqual(out.length, 3);
+  assert.deepStrictEqual(out.map((x) => x.n), [3, 1, 2]);
+  assert.deepStrictEqual(L.reorderById(null, ['a'], (x) => x.id), []);
+});
+
 console.log('\n' + n + ' test Allenamenti superati');

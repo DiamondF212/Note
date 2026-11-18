@@ -820,3 +820,11 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 .wk-chart .wk-line { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .wk-chart .wk-dot { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
 .wk-chart .wk-dot.last { fill: var(--accent); }
+
+/* Riordino con maniglia (workouts.js) */
+.workout-grip { width: 34px; height: 38px; margin-right: 4px; border-radius: 12px; color: var(--muted); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.workout-grip:active, .workout-grip:focus-visible { transform: none; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.workout-sorting { user-select: none; -webkit-user-select: none; }
+.workout-sorting .workout-grip { cursor: grabbing; }
+.is-sorting-item { position: relative; z-index: 6; cursor: grabbing; border-color: var(--accent) !important; box-shadow: var(--shadow), 0 0 0 1px var(--accent); transition: none !important; }
+.is-settling { position: relative; z-index: 6; }

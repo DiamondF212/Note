@@ -136,6 +136,103 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' atteso «' 
     const days = await page.evaluate(() => window.N.workouts._state.program.days);
     eq(days[1].name, 'Mobilità'); eq(days[1].weekday, '');
   });
+  const dragHandle = async (handle, toY) => {
+    await handle.scrollIntoViewIfNeeded();
+    const b = await handle.boundingBox();
+    const x = b.x + b.width / 2, y = b.y + b.height / 2;
+    await page.mouse.move(x, y); await page.mouse.down();
+    await page.mouse.move(x, (y + toY) / 2, { steps: 6 });
+    await page.mouse.move(x, toY, { steps: 10 });
+    await page.mouse.up();
+  };
+  const dayNames = () => page.evaluate(() => window.N.workouts._state.program.days.map((d) => d.name));
+  const storedDayNames = () => page.evaluate(async () => (await window.N.db.workouts.get('program')).days.map((d) => d.name));
+  await t('trascinando la maniglia si riordinano i giorni e l’ordine resta dopo il riavvio', async () => {
+    await page.waitForSelector('.workout-day-title'); // la giornata appena creata deve essere aperta prima di tornare indietro
+    await page.goBack(); await page.waitForSelector('.workout-day-card');
+    eq(await page.locator('.workout-grip').count(), 2);
+    eq((await dayNames()).join('|'), 'Petto e tricipiti|Mobilità');
+    const first = await page.locator('.workout-day-card').nth(0).boundingBox();
+    await dragHandle(page.locator('.workout-day-card .workout-grip').nth(1), first.y + 4);
+    await page.waitForFunction(() => window.N.workouts._state.program.days[0].name === 'Mobilità');
+    eq((await dayNames()).join('|'), 'Mobilità|Petto e tricipiti');
+    eq(await page.locator('.workout-day-card').nth(0).innerText().then((x) => x.includes('Mobilità')), true);
+    eq(await page.locator('.workout-day-number').nth(0).innerText(), '01');
+    eq(await page.locator('.workout-day-number').nth(1).innerText(), '02');
+    await page.waitForTimeout(350);
+    eq((await storedDayNames()).join('|'), 'Mobilità|Petto e tricipiti');
+    await page.goto('about:blank'); await page.goto(base); await page.waitForSelector('#list'); await openWorkouts();
+    await page.waitForSelector('.workout-day-card');
+    eq(await page.locator('.workout-day-card').nth(0).innerText().then((x) => x.includes('Mobilità')), true);
+  });
+  await t('con la tastiera le frecce sulla maniglia spostano il giorno e lo salvano', async () => {
+    await page.locator('.workout-day-card .workout-grip').nth(0).focus();
+    await page.keyboard.press('ArrowDown');
+    await page.waitForFunction(() => window.N.workouts._state.program.days[0].name === 'Petto e tricipiti');
+    eq(await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('workout-grip')), true);
+    await page.keyboard.press('ArrowDown');
+    eq((await dayNames()).join('|'), 'Petto e tricipiti|Mobilità');
+    await page.waitForTimeout(350);
+    eq((await storedDayNames()).join('|'), 'Petto e tricipiti|Mobilità');
+  });
+  await t('gli esercizi di un giorno si riordinano col trascinamento, anche durante una sessione', async () => {
+    await page.locator('.workout-day-card:has-text("Petto e tricipiti") [data-workout-open-day]').click();
+    await page.waitForSelector('[data-workout-exercise]');
+    eq(await page.locator('.workout-grip').count(), 0);
+    for (const nome of ['Croci ai cavi', 'Dip']) {
+      await page.click('[data-workout-add-exercise]');
+      await page.locator('[data-workout-exercise-name]').fill(nome);
+      await page.click('[data-workout-save-exercise]');
+      await page.waitForFunction((n) => window.N.workouts._state.program.days.some((d) => d.exercises.some((e) => e.name === n)), nome);
+    }
+    const names = () => page.evaluate(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|'));
+    eq(await names(), 'Panca piana|Croci ai cavi|Dip');
+    await page.waitForFunction(() => document.querySelectorAll('.workout-exercise-card .workout-grip').length === 3);
+    eq(await page.locator('.workout-exercise-card .workout-grip').count(), 3);
+    const first = await page.locator('.workout-exercise-card').nth(0).boundingBox();
+    await dragHandle(page.locator('.workout-exercise-card .workout-grip').nth(2), first.y + 4);
+    await page.waitForFunction(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises[0].name === 'Dip');
+    eq(await names(), 'Dip|Panca piana|Croci ai cavi');
+    eq(await page.locator('.workout-exercise-card').nth(0).innerText().then((x) => x.includes('Dip')), true);
+    await page.click('[data-workout-start]');
+    await page.waitForSelector('[data-set-reps]');
+    await page.locator('.workout-exercise-card .workout-grip').nth(0).focus();
+    await page.keyboard.press('ArrowDown');
+    await page.waitForFunction(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises[0].name === 'Panca piana');
+    const sessione = await page.evaluate(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').activeSession.exercises.map((e) => e.name).join('|'));
+    eq(sessione, 'Panca piana|Dip|Croci ai cavi');
+    await page.waitForTimeout(350);
+    const salvato = await page.evaluate(async () => (await window.N.db.workouts.get('program')).days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|'));
+    eq(salvato, 'Panca piana|Dip|Croci ai cavi');
+  });
+  await t('il trascinamento funziona anche con veri eventi touch (dito sul telefono)', async () => {
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
+    const names = () => page.evaluate(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|'));
+    const prima = await names();
+    const first = await page.locator('.workout-exercise-card').nth(0).boundingBox();
+    const handle = page.locator('.workout-exercise-card .workout-grip').nth(2);
+    await handle.scrollIntoViewIfNeeded();
+    const b = await handle.boundingBox();
+    const x = b.x + b.width / 2, y = b.y + b.height / 2, toY = first.y + 4;
+    await touch('touchStart', x, y);
+    for (let i = 1; i <= 14; i++) await touch('touchMove', x, y + (toY - y) * i / 14);
+    await touch('touchEnd');
+    await page.waitForFunction((p) => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|') !== p, prima);
+    const dopo = await names();
+    eq(dopo.split('|')[0], prima.split('|')[2]);
+    eq(dopo.split('|').length, 3);
+    await page.waitForTimeout(350);
+    const salvato = await page.evaluate(async () => (await window.N.db.workouts.get('program')).days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|'));
+    eq(salvato, dopo);
+  });
+  await t('un semplice tocco sulla maniglia non cambia l’ordine', async () => {
+    const prima = await page.evaluate(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|'));
+    await page.locator('.workout-exercise-card .workout-grip').nth(1).click();
+    await page.waitForTimeout(300);
+    const dopo = await page.evaluate(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|'));
+    eq(dopo, prima);
+  });
   await t('nessun errore JavaScript durante il flusso', async () => eq(errors.join(' | '), ''));
 
   console.log('\n' + passed + ' superati, ' + failed + ' falliti');

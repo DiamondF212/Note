@@ -113,6 +113,162 @@
       grid + line + dots + value + xLabels + '</svg>';
   }
 
+  // Riordina `list` secondo `ids`. Non perde elementi: gli id sconosciuti si ignorano, quelli mancanti restano in coda.
+  function reorderById(list, ids, getId) {
+    const arr = Array.isArray(list) ? list : [];
+    const pool = new Map();
+    arr.forEach((item) => {
+      const id = getId(item);
+      if (!pool.has(id)) pool.set(id, []);
+      pool.get(id).push(item);
+    });
+    const out = [];
+    (Array.isArray(ids) ? ids : []).forEach((id) => {
+      const queue = pool.get(id);
+      if (queue && queue.length) out.push(queue.shift());
+    });
+    const taken = new Set(out);
+    arr.forEach((item) => { if (!taken.has(item)) out.push(item); });
+    return out;
+  }
+
+  // Riordino con maniglia: puntatore (mouse, touch, penna) e tastiera (frecce su/giù sulla maniglia).
+  // Usa la proprietà `translate`, indipendente da `transform`, così non confligge con le animazioni delle card.
+  function makeSortable(container, itemSel, handleSel, idOf, onReorder) {
+    const items = () => Array.from(container.children).filter((el) => el.matches(itemSel));
+    const ids = () => items().map(idOf);
+    const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+    let drag = null;
+
+    function step(item, dir) {
+      const list = items();
+      const ref = list[list.indexOf(item) + dir];
+      if (!ref) return false;
+      if (dir < 0) ref.before(item); else ref.after(item);
+      return true;
+    }
+    // Esegue `mutate` e fa scorrere con morbidezza gli elementi che cambiano posizione (tecnica FLIP).
+    function animateAround(skip, mutate) {
+      const others = items().filter((el) => el !== skip);
+      const before = others.map((el) => el.getBoundingClientRect().top);
+      mutate();
+      others.forEach((el, i) => {
+        const dy = before[i] - el.getBoundingClientRect().top;
+        if (!dy) return;
+        el.style.transition = 'none';
+        el.style.translate = '0 ' + dy + 'px';
+        void el.offsetHeight;
+        el.style.transition = 'translate .18s var(--ease-smooth)';
+        el.style.translate = '0 0';
+      });
+    }
+    const mid = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+    function update() {
+      if (!drag) return;
+      const item = drag.item;
+      const center = drag.y - drag.grab + drag.h / 2;
+      for (let guard = 0; guard < 20; guard++) {
+        const list = items();
+        const i = list.indexOf(item);
+        if (list[i - 1] && center < mid(list[i - 1])) animateAround(item, () => step(item, -1));
+        else if (list[i + 1] && center > mid(list[i + 1])) animateAround(item, () => step(item, 1));
+        else break;
+      }
+      const natural = item.getBoundingClientRect().top - drag.ty;
+      drag.ty = drag.y - drag.grab - natural;
+      item.style.translate = '0 ' + drag.ty + 'px';
+    }
+    function edgeScroll() {
+      const scroller = container.closest('.workout-body');
+      if (!scroller || !drag) return;
+      const r = scroller.getBoundingClientRect();
+      drag.speed = drag.y < r.top + 70 ? -10 : drag.y > r.bottom - 70 ? 10 : 0;
+      if (!drag.speed || drag.raf) return;
+      const tick = () => {
+        if (!drag || !drag.speed) { if (drag) drag.raf = 0; return; }
+        scroller.scrollTop += drag.speed;
+        update();
+        drag.raf = requestAnimationFrame(tick);
+      };
+      drag.raf = requestAnimationFrame(tick);
+    }
+    function finish(e, cancelled) {
+      if (!drag || (e && e.pointerId !== drag.pointerId)) return;
+      const d = drag;
+      drag = null;
+      cancelAnimationFrame(d.raf);
+      try { container.releasePointerCapture(d.pointerId); } catch (_) { /* già rilasciato */ }
+      if (cancelled) {
+        const byId = new Map(items().map((el) => [idOf(el), el]));
+        d.startIds.forEach((id) => { const el = byId.get(id); if (el) container.append(el); });
+      }
+      d.item.classList.remove('is-sorting-item');
+      d.item.classList.add('is-settling');
+      d.item.style.transition = 'translate .18s var(--ease-smooth)';
+      d.item.style.translate = '0 0';
+      setTimeout(() => {
+        items().forEach((el) => { el.style.translate = ''; el.style.transition = ''; el.classList.remove('is-settling'); });
+        container.classList.remove('workout-sorting');
+      }, 230);
+      const now = ids();
+      if (!same(now, d.startIds)) {
+        if (navigator.vibrate) navigator.vibrate(8);
+        onReorder(now);
+      }
+    }
+
+    container.addEventListener('pointerdown', (e) => {
+      const handle = e.target.closest(handleSel);
+      if (!handle || !container.contains(handle) || drag) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const item = handle.closest(itemSel);
+      if (!item) return;
+      e.preventDefault();
+      // La cattura sta sul contenitore, che non si sposta: la maniglia viaggia con la card e perderebbe la cattura.
+      try { container.setPointerCapture(e.pointerId); } catch (_) { /* non supportato */ }
+      const rect = item.getBoundingClientRect();
+      drag = { item, handle, pointerId: e.pointerId, y: e.clientY, grab: e.clientY - rect.top, h: rect.height, ty: 0, startIds: ids(), raf: 0, speed: 0 };
+      item.classList.add('is-sorting-item');
+      container.classList.add('workout-sorting');
+      if (navigator.vibrate) navigator.vibrate(12);
+    });
+    container.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      drag.y = e.clientY;
+      update();
+      edgeScroll();
+    });
+    container.addEventListener('pointerup', (e) => finish(e, false));
+    container.addEventListener('pointercancel', (e) => finish(e, true));
+    container.addEventListener('lostpointercapture', (e) => finish(e, true));
+    container.addEventListener('keydown', (e) => {
+      const handle = e.target.closest(handleSel);
+      if (!handle || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const item = handle.closest(itemSel);
+      if (!item) return;
+      e.preventDefault();
+      let moved = false;
+      animateAround(null, () => { moved = step(item, e.key === 'ArrowUp' ? -1 : 1); });
+      if (moved) { handle.focus(); onReorder(ids()); }
+    });
+  }
+  function gripButton(label) {
+    return ctx.h('button', {
+      class: 'ibtn workout-grip', type: 'button', 'data-workout-grip': '1',
+      'aria-label': label, title: 'Trascina per riordinare (o usa le frecce su/giù)', html: ctx.I('grip', 20)
+    });
+  }
+  function applyDayOrder(ids) {
+    state.program.days = reorderById(state.program.days, ids, (d) => d.id);
+    if (state.ui) state.ui.body.querySelectorAll('.workout-day-number').forEach((el, i) => { el.textContent = String(i + 1).padStart(2, '0'); });
+    save().catch(onSaveError);
+  }
+  function applyExerciseOrder(day, ids) {
+    day.exercises = reorderById(day.exercises, ids, (e) => e.id);
+    if (day.activeSession) day.activeSession.exercises = reorderById(day.activeSession.exercises, ids, (e) => e.exerciseId);
+    save().catch(onSaveError);
+  }
+
   async function load() {
     state.program = normalizeProgram(await N.db.workouts.get(STORE_ID));
   }
@@ -216,7 +372,7 @@
       days.forEach((day, index) => {
         const exercises = day.exercises.length;
         const last = daySessions(day.id)[0];
-        list.append(ctx.h('article', { class: 'workout-day-card' },
+        list.append(ctx.h('article', { class: 'workout-day-card', 'data-workout-day-card': day.id },
           ctx.h('button', { class: 'workout-day-main', 'data-workout-open-day': day.id, onclick: () => openDay(day.id) },
             ctx.h('span', { class: 'workout-day-number' }, String(index + 1).padStart(2, '0')),
             ctx.h('span', { class: 'workout-day-copy' },
@@ -226,10 +382,12 @@
             ),
             ctx.h('span', { class: 'workout-chevron', 'aria-hidden': 'true' }, '›')
           ),
-          ctx.ibtn('more', () => dayOptions(day.id), 'Opzioni di ' + day.name, 'workout-day-more')
+          ctx.ibtn('more', () => dayOptions(day.id), 'Opzioni di ' + day.name, 'workout-day-more'),
+          days.length > 1 ? gripButton('Riordina ' + day.name) : null
         ));
       });
       body.append(list);
+      if (days.length > 1) makeSortable(list, '.workout-day-card', '.workout-grip', (el) => el.dataset.workoutDayCard, applyDayOrder);
     }
     if (latest) {
       const stats = sessionStats(latest);
@@ -267,6 +425,7 @@
       const list = ctx.h('div', { class: 'workout-exercises' });
       day.exercises.forEach((ex) => list.append(renderExercise(day, ex, active)));
       body.append(list);
+      if (exerciseCount > 1) makeSortable(list, '.workout-exercise-card', '.workout-grip', (el) => el.dataset.workoutExercise, (ids) => applyExerciseOrder(day, ids));
     }
     if (active) {
       body.append(ctx.h('div', { class: 'workout-session-summary', id: 'workout-session-summary' }, summaryText(sessionStats(active))));
@@ -296,7 +455,8 @@
         ctx.h('strong', null, ex.name),
         ctx.h('small', null, ex.setCount + ' serie · ' + ex.reps + ' rip · ' + fmtKg(ex.kg) + ' kg')
       ),
-      ctx.ibtn('more', () => exerciseOptions(day.id, ex.id), 'Opzioni di ' + ex.name, 'workout-exercise-more')
+      ctx.ibtn('more', () => exerciseOptions(day.id, ex.id), 'Opzioni di ' + ex.name, 'workout-exercise-more'),
+      day.exercises.length > 1 ? gripButton('Riordina ' + ex.name) : null
     ));
     if (!active || !current) {
       card.append(ctx.h('div', { class: 'workout-target-row' },
@@ -564,7 +724,7 @@
     }
   }
 
-  const _logic = { cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
+  const _logic = { cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.workouts;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));
