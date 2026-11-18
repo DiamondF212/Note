@@ -19,7 +19,8 @@ const ok = (c, m) => { if (!c) throw new Error(m || 'condizione falsa'); };
 (async () => {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://localhost:' + server.address().port + '/';
-  const browser = await chromium.launch();
+  const executablePath = process.env.CHROMIUM_PATH || (fs.existsSync('/repl/tools/bin/chromium') ? '/repl/tools/bin/chromium' : undefined);
+  const browser = await chromium.launch(executablePath ? { executablePath, args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {});
   const mk = async (opts) => {
     const ctx = await browser.newContext(Object.assign({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: 'it-IT', serviceWorkers: 'block' }, opts));
     await ctx.grantPermissions([], {});
@@ -387,7 +388,7 @@ const ok = (c, m) => { if (!c) throw new Error(m || 'condizione falsa'); };
   await page.evaluate(() => navigator.serviceWorker.ready); await page.waitForTimeout(800);
   await t('offline: tools.js è nella cache del service worker', async () => {
     const hit = await page.evaluate(async () => !!(await caches.match('./tools.js'))); ok(hit, 'tools.js non in cache');
-    const keys = await page.evaluate(() => caches.keys()); ok(keys.includes('note-v19'), keys.join());
+    const keys = await page.evaluate(() => caches.keys()); ok(keys.includes('note-v20'), keys.join());
   });
   await ctx.setOffline(true);
   await page.reload(); await page.waitForSelector('#list');
