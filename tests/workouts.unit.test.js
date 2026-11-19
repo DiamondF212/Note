@@ -226,4 +226,72 @@ t('promemoria: un avviso a settimana per ogni giorno assegnato, con la numerazio
   for (const bad of ['7:30', '24:00', '12:60', '', null]) assert.strictEqual(L.parseTime(bad), null, String(bad));
 });
 
+/* ---------- gruppi, massimale, riscaldamento, confronto, backup ---------- */
+t('il gruppo muscolare accetta solo valori noti e senza gruppo cade in Altro', () => {
+  assert.strictEqual(L.cleanGroup('Dorso'), 'Dorso');
+  assert.strictEqual(L.cleanGroup('Braccia'), null);
+  assert.strictEqual(L.groupOf({ group: 'Gambe' }), 'Gambe');
+  assert.strictEqual(L.groupOf({}), 'Altro');
+  const p = L.normalizeProgram({ days: [{ id: 'a', exercises: [{ id: 'x', name: 'Curl', group: 'Bicipiti' }, { id: 'y', name: 'Vago', group: 'Boh' }] }] });
+  assert.strictEqual(p.days[0].exercises[0].group, 'Bicipiti');
+  assert.strictEqual(p.days[0].exercises[1].group, undefined);
+});
+t('il volume settimanale conta le serie di lavoro per gruppo, senza riscaldamento né sessioni vecchie', () => {
+  const now = 20 * 864e5;
+  const sessions = [
+    { id: 'a', completedAt: now - 1000, exercises: [
+      { exerciseId: 'p', group: 'Petto', sets: [{ reps: 8, kg: 50, done: true }, { reps: 8, kg: 20, done: true, type: 'warmup' }, { reps: 8, kg: 50, done: false }] },
+      { exerciseId: 'q', sets: [{ reps: 10, kg: 10, done: true }] }] },
+    { id: 'b', completedAt: now - 9 * 864e5, exercises: [{ exerciseId: 'p', group: 'Petto', sets: [{ reps: 5, kg: 100, done: true }] }] }
+  ];
+  assert.deepStrictEqual(L.weeklyGroupVolume(sessions, now), [
+    { group: 'Petto', sets: 1, volume: 400 }, { group: 'Altro', sets: 1, volume: 100 }
+  ]);
+});
+t('la stima del massimale usa Epley e non stima oltre 12 ripetizioni', () => {
+  assert.strictEqual(L.estimateOneRm(100, 1), 100);
+  assert.strictEqual(L.estimateOneRm(100, 10), 133.3);
+  assert.strictEqual(L.estimateOneRm(100, 13), null);
+  assert.strictEqual(L.estimateOneRm(0, 5), null);
+  assert.deepStrictEqual(L.bestOneRm([{ t: 1, kg: 80, reps: 5 }, { t: 2, kg: 90, reps: 3 }, { t: 3, kg: 60, reps: 20 }]),
+    { value: 99, t: 2, kg: 90, reps: 3 });
+  assert.strictEqual(L.bestOneRm([]), null);
+});
+t('il riscaldamento suggerito parte da 20 kg, arrotonda a 2,5 kg e non supera il carico', () => {
+  assert.deepStrictEqual(L.warmupPlan(100, 6), [{ kg: 50, reps: 6 }, { kg: 70, reps: 5 }, { kg: 85, reps: 3 }]);
+  assert.deepStrictEqual(L.warmupPlan(20, 10), [{ kg: 10, reps: 8 }, { kg: 15, reps: 5 }, { kg: 17.5, reps: 3 }]);
+  assert.deepStrictEqual(L.warmupPlan(15, 10), []);
+  assert.deepStrictEqual(L.warmupPlan(null, 10), []);
+});
+t('il confronto tra sessioni mostra la differenza di volume e del carico massimo per esercizio', () => {
+  const prev = { id: 'p', dayId: 'd', completedAt: 1000, exercises: [
+    { exerciseId: 'x', name: 'Panca', sets: [{ reps: 8, kg: 60, done: true }, { reps: 8, kg: 60, done: true }] }] };
+  const curr = { id: 'c', dayId: 'd', completedAt: 2000, exercises: [
+    { exerciseId: 'x', name: 'Panca', sets: [{ reps: 8, kg: 65, done: true }, { reps: 6, kg: 65, done: true }] },
+    { exerciseId: 'y', name: 'Croci', sets: [{ reps: 10, kg: 10, done: true }] }] };
+  const c = L.compareSessions(prev, curr);
+  assert.strictEqual(c.delta, 50);
+  assert.strictEqual(c.pct, 5);
+  assert.deepStrictEqual(c.exercises, [{ name: 'Panca', kg: 65, prevKg: 60, delta: 5 }]);
+});
+t('la sessione precedente è la più recente dello stesso giorno', () => {
+  const list = [
+    { id: 'a', dayId: 'd', completedAt: 100 }, { id: 'b', dayId: 'd', completedAt: 300 },
+    { id: 'c', dayId: 'altro', completedAt: 250 }, { id: 'e', dayId: 'd', completedAt: 500 }];
+  assert.strictEqual(L.previousSession(list, list[3]).id, 'b');
+  assert.strictEqual(L.previousSession(list, list[0]), null);
+});
+t('il backup esportato si legge di nuovo e rifiuta i file non validi', () => {
+  const prog = { days: [{ id: 'd', name: 'Petto', exercises: [{ id: 'x', name: 'Panca', setCount: 3, reps: 8, kg: 50, group: 'Petto' }] }],
+    sessions: [{ id: 's', dayId: 'd', completedAt: 5, exercises: [] }] };
+  const text = JSON.stringify(L.makeBackup(prog, 0));
+  const back = L.parseBackup(text);
+  assert.strictEqual(back.days[0].exercises[0].group, 'Petto');
+  assert.strictEqual(back.sessions.length, 1);
+  assert.throws(() => L.parseBackup('non json'), /non è un backup valido/);
+  assert.throws(() => L.parseBackup(JSON.stringify({ app: 'altra', version: 1, program: {} })), /non è un backup di Allenamenti/);
+  assert.throws(() => L.parseBackup(JSON.stringify({ app: 'mie-note-allenamenti', version: 9, program: {} })), /Versione/);
+  assert.throws(() => L.parseBackup(JSON.stringify({ app: 'mie-note-allenamenti', version: 1, program: {} })), /vuoto/);
+});
+
 console.log('\n' + n + ' test Allenamenti superati');

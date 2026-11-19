@@ -117,3 +117,13 @@ Scelte dell'utente tra le idee proposte: note, costanza, tipi di serie e RPE, pe
 4. Piccole rifiniture possibili: la scheda esercizio fuori sessione non mostra i tipi di serie (riscaldamento/drop); nella panoramica «1 sessioni» andrebbe al singolare.
 
 **Metodo di lavoro che ha funzionato:** nei test e2e di Allenamenti si può simulare l'app Android con un finto `window.Capacitor`; per leggere un errore della CI si usano le annotazioni via API (i log completi sono bloccati per me); per giudicare l'aspetto si fanno screenshot con Playwright a 390 px e un orologio fisso. Nei comandi di shell evitare `${PIPESTATUS[0]}`: la shell `sh` abortisce la riga e salta i comandi successivi.
+
+## Allenamenti v3 (in corso di consegna)
+Richieste dall'utente, nell'ordine: 1) backup importabile, 2) riscaldamento suggerito, 3) confronto tra sessioni, 4) volume settimanale per gruppo muscolare, 5) stima del massimale.
+- **Backup**: in fondo alla panoramica di Allenamenti, «Esporta» scarica un file JSON (`allenamenti-AAAA-MM-GG.json`); «Importa» legge il file, mostra quante giornate e sessioni contiene e, dopo conferma, sostituisce i dati attuali. Il formato è `{app, version: 1, exportedAt, program}`.
+- **Riscaldamento suggerito**: nella sessione in corso, sull'esercizio con carico ≥ 20 kg, un pulsante aggiunge tre serie di riscaldamento (50%, 70%, 85% del carico, arrotondati a 2,5 kg). Non si aggiunge due volte.
+- **Confronto**: nella giornata, la card «Confronto» mostra volume e carico massimo per esercizio rispetto alla sessione precedente dello stesso giorno. Stessa card nel dettaglio di ogni sessione.
+- **Gruppo muscolare**: ogni esercizio può avere un gruppo (Petto, Dorso, Spalle, Bicipiti, Tricipiti, Gambe, Glutei, Addome, Altro). La panoramica mostra le serie di lavoro degli ultimi 7 giorni per gruppo. Il riscaldamento non conta.
+- **Massimale stimato**: nella scheda progressi di un esercizio, formula di Epley sulla serie migliore, fino a 12 ripetizioni.
+- Test: `tests/workouts.unit.test.js` ha 34 casi per la logica nuova. Le verifiche end-to-end le esegue la CI.
+- Da provare su Android: promemoria (ancora in attesa), esportazione del file e importazione.

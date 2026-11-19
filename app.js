@@ -1218,7 +1218,7 @@
 
   /* =============== allenamenti (schede e sessioni offline) =============== */
   function workoutsCtx() {
-    return { h, I, ibtn, toast, openSheet, pushLayer, back, uid };
+    return { h, I, ibtn, toast, openSheet, pushLayer, back, uid, download };
   }
   function openWorkouts() { N.workouts.init(workoutsCtx()); return N.workouts.open(); }
 

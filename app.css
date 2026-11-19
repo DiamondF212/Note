@@ -901,3 +901,24 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 .workout-weight-row { display: flex; align-items: center; gap: 10px; min-height: 46px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 .workout-weight-row span { flex: 1; color: var(--muted); font-size: .8rem; }
 .workout-weight-row strong { font-size: .88rem; }
+
+/* Allenamenti v3: volume per gruppo, riscaldamento, confronto, massimale, backup */
+.workout-volume, .workout-compare, .workout-backup { margin-top: 16px; padding: 14px; border-radius: 18px; background: var(--surface); }
+.workout-volume-row { display: grid; grid-template-columns: 84px 1fr auto; align-items: center; gap: 10px; margin: 9px 0; font-size: .8rem; }
+.workout-volume-label { color: var(--muted); }
+.workout-volume-track { height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 8%, transparent); overflow: hidden; }
+.workout-volume-bar { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .45s var(--ease-smooth); }
+.workout-volume-row b { font-size: .75rem; white-space: nowrap; }
+.workout-warmup-btn { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; padding: 9px 12px; border-radius: 12px; font-size: .78rem; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.workout-warmup-btn:active { transform: scale(.97); }
+.workout-compare h4 { margin: 2px 0 6px; font-size: .9rem; }
+.workout-compare-total { margin: 4px 0 8px; font-size: 1.1rem; font-weight: 700; letter-spacing: -.02em; }
+.workout-compare-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: .8rem; }
+.workout-compare-row b { white-space: nowrap; }
+.workout-compare .up { color: #66bb6a; }
+.workout-compare .down, .workout-compare-total.down { color: var(--danger); }
+.workout-orm { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 2px; padding: 12px 13px; border-radius: 15px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.workout-orm strong { font-size: 1.3rem; letter-spacing: -.03em; }
+.workout-orm span, .workout-orm small { color: var(--muted); font-size: .72rem; }
+.workout-backup-actions { display: flex; gap: 8px; margin-top: 10px; }
+.workout-backup-actions .btn { flex: 1; }
