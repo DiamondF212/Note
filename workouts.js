@@ -672,8 +672,12 @@
     area.addEventListener('change', () => save().catch(onSaveError));
     if (kind === 'session') return ctx.h('label', { class: 'workout-note-card' }, ctx.h('span', null, label), area);
     area.hidden = !target.note;
-    const toggle = ctx.h('button', { class: 'workout-note-toggle', type: 'button', 'data-exercise-note-toggle': '1', onclick: () => { area.hidden = !area.hidden; if (!area.hidden) area.focus(); } },
-      ctx.h('span', { html: ctx.I('edit', 15) }), target.note ? 'Nota di oggi' : 'Aggiungi una nota');
+    const toggleText = document.createTextNode('');
+    const paintLabel = () => { toggleText.nodeValue = (!area.hidden || target.note) ? 'Nota di oggi' : 'Aggiungi una nota'; };
+    const toggle = ctx.h('button', { class: 'workout-note-toggle', type: 'button', 'data-exercise-note-toggle': '1', onclick: () => { area.hidden = !area.hidden; paintLabel(); if (!area.hidden) area.focus(); } },
+      ctx.h('span', { html: ctx.I('edit', 15) }), toggleText);
+    area.addEventListener('input', paintLabel);
+    paintLabel();
     return ctx.h('div', { class: 'workout-note-wrap' }, toggle, area);
   }
   function updateSet(day, current, index, key, value) {

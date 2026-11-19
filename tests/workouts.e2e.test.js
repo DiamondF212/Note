@@ -306,7 +306,9 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' atteso «' 
     await page.locator('[data-set-rpe]').nth(2).fill('11'); await page.locator('[data-set-rpe]').nth(2).press('Tab');
     eq(await page.locator('[data-set-rpe]').nth(2).inputValue(), '', 'un RPE oltre 10 viene scartato');
     for (let i = 0; i < 3; i++) await page.locator('[data-set-done]').nth(i).click();
+    eq((await page.locator('[data-exercise-note-toggle]').first().innerText()).trim(), 'Aggiungi una nota');
     await page.click('[data-exercise-note-toggle]');
+    eq((await page.locator('[data-exercise-note-toggle]').first().innerText()).trim(), 'Nota di oggi', 'aprendo la nota l’etichetta cambia');
     await page.locator('textarea[data-exercise-note]').fill('spalla fastidiosa'); await page.locator('textarea[data-exercise-note]').press('Tab');
     await page.locator('[data-session-note]').fill('Giornata stanca ma buona'); await page.locator('[data-session-note]').press('Tab');
     eq(await page.locator('#workout-session-summary').innerText(), '3 / 3 serie completate · 720 kg di volume');

@@ -91,31 +91,29 @@ Voce «Allenamenti» nel dock della home (`workouts.js`, `N.workouts`, stili `.w
 - **Fatto:** giornate di allenamento (nome e giorno della settimana facoltativo), esercizi con serie, ripetizioni e kg di partenza, sessione con serie da spuntare, cronologia delle sessioni, riepilogo settimanale, modifica e rimozione di giornate ed esercizi.
 - **Grafici progressi:** dal menu «⋯» di un esercizio → **Vedi progressi**. Due grafici a linea nel tempo: carico massimo (kg) e ripetizioni, usando per ogni sessione la serie più pesante completata (a parità di kg vince quella con più ripetizioni). Le sessioni sono distanziate in modo uniforme, non in proporzione al tempo. Logica pura in `N.workouts._logic`: `exerciseHistory`, `lineChartSvg`.
 - **Riordino con drag and drop (cache `note-v22`):** ogni giorno (panoramica) e ogni esercizio (dentro un giorno) ha una maniglia a sei puntini a destra, visibile solo se ce ne sono almeno due. Si trascina con mouse, dito o penna; in alternativa, con la maniglia a fuoco, frecce su/giù. L'ordine si salva subito (giorni: `program.days`; esercizi: `day.exercises` e, se c'è una sessione in corso, anche `activeSession.exercises`) e i numeri 01, 02… dei giorni si aggiornano. Motore in `workouts.js` (`makeSortable`, `reorderById`): la cattura del puntatore sta sul contenitore perché la card si sposta nel DOM durante il trascinamento; si usa la proprietà CSS `translate` (non `transform`) per non confliggere con l'animazione `note-arrive`. Non usa `drag_drop.js`, che serve solo per le note.
-- **Test:** `tests/workouts.unit.test.js` (13; 27 sul ramo `wip/allenamenti-v2`) e `tests/workouts.e2e.test.js` (14, compresi trascinamento col mouse, con veri eventi touch via CDP e con la tastiera).
+- **Test:** `tests/workouts.unit.test.js` (27) e `tests/workouts.e2e.test.js` (23, compresi trascinamento col mouse, con veri eventi touch via CDP e con la tastiera).
 - **Scelte confermate dall'utente:** lo split (giorni numerati o giorni della settimana, facoltativi) e l'animazione della spunta restano come sono.
 - **Attenzione:** quando si cambia un file in cache, aggiornare la versione in `sw.js` (ora `note-v22`) e il test `tests/tools.e2e.test.js`. Nei test e2e, dopo aver creato una giornata aspettare `.workout-day-title` prima di usare `page.goBack()`.
 - **CI (GitHub Actions «Test e APK»):** dal 18/11 il lavoro `test` era rosso con «exit code 2» per un'eccezione non gestita in `tests/pdf_pages.e2e.test.js` («errori in console: RenderingCancelledException»), non per gli allenamenti. Corretto in `pdf_pages.js` (`renderThumb` ignora l'annullamento del disegno se la schermata è chiusa). Per leggere l'errore di un test fallito in CI: i log si scaricano solo dal sito GitHub; dall'API si leggono le annotazioni del job. Il codice di uscita 2 indica un'eccezione fuori dai singoli test, l'1 un test fallito.
 
-### Stato verificato (19/11/2026)
-Su `main` (dopo `b46187a`): test unitari e 15 suite e2e passano in locale e la CI «Test e APK» è verde (test + APK).
+### Allenamenti v2 (in `main`, 19/11/2026)
+Scelte dell'utente tra le idee proposte: note, costanza, tipi di serie e RPE, peso corporeo, e ripetizioni diverse per ogni serie quando si aggiunge un esercizio.
 
-### Allenamenti v2 — lavori in corso (ramo `wip/allenamenti-v2`, NON ancora in `main`)
-Scelte dell'utente (19/11/2026) tra le idee proposte: note, costanza, tipi di serie e RPE, peso corporeo, e ripetizioni diverse per ogni serie quando si aggiunge un esercizio. Non scelte (restano idee): timer di recupero, «ultima volta» con serie pre-compilate, record personali, duplica giornata, backup/esportazione.
-
-**Fatto e testato** (su `wip/allenamenti-v2`: 9 gruppi di test unitari e tutte le 15 suite e2e passano; allenamenti = 27 unitari + 23 e2e; cache `note-v23`; `app.js` ha le icone `flame` e `scale`):
-- **Ripetizioni per serie:** il modulo esercizio ha «Rip. di tutte» (le imposta tutte) più una riga per ogni serie con ripetizioni e tipo; il numero di serie si può cambiare senza perdere i valori già scritti. Dati: `setReps` e `setTypes` compaiono nell'esercizio **solo se servono** (schede e test vecchi restano identici). Obiettivo mostrato come «3 × 10» oppure «12 · 10 · 8».
+**Funzioni:**
+- **Ripetizioni per serie:** il modulo esercizio ha «Rip. di tutte» (le imposta tutte) più una riga per ogni serie con ripetizioni e tipo; cambiando il numero di serie i valori già scritti non si perdono. Dati: `setReps` e `setTypes` compaiono nell'esercizio **solo se servono** (schede e test vecchi restano identici). Obiettivo mostrato come «3 × 10» oppure «12 · 10 · 8».
 - **Tipi di serie e RPE:** in sessione si tocca il numero della serie per passare da normale a riscaldamento a drop set (`set.type` solo se non normale); RPE da 1 a 10 a passi di 0,5 (`set.rpe`). Il riscaldamento conta tra le serie fatte ma non nel volume né nei grafici dei progressi.
-- **Note:** nota fissa dell'esercizio (nel modulo), «nota di oggi» per esercizio e nota della sessione; tutte restano nella cronologia.
-- **Costanza:** settimane consecutive con almeno una sessione (lunedì–domenica, la settimana in corso non spezza la serie), pallini della settimana, calendario mensile con elenco delle sessioni del giorno toccato.
+- **Note:** nota fissa dell'esercizio (nel modulo), «nota di oggi» per esercizio e nota della sessione; restano nella cronologia.
+- **Costanza:** settimane consecutive con almeno una sessione (lunedì–domenica, la settimana in corso non spezza la serie), pallini della settimana, calendario mensile con le sessioni del giorno toccato.
 - **Promemoria:** una notifica settimanale per ogni giorno con giorno della settimana assegnato, all'ora scelta, con il plugin nativo `LocalNotifications` (id 7200–7206, `weekday` 1 = domenica come nel codice Android del plugin, `second: 0`). Nel browser non si attiva e lo spiega.
 - **Peso corporeo:** una misura al giorno (la seconda dello stesso giorno sostituisce la prima), variazione dall'ultima, grafico dell'andamento, eliminazione di una misura.
-- Dati: `program.bodyWeights` e `program.reminder` sono nuovi campi della scheda (normalizzati al caricamento).
+- Dati: `program.bodyWeights` e `program.reminder` sono campi nuovi della scheda, normalizzati al caricamento. Cache del service worker: `note-v23`.
 
-**Da fare, in ordine:**
-1. Verifica visiva su schermo da 390 px con screenshot: modulo esercizio, righe serie a 5 colonne (numero, rip, kg, RPE, OK), schede Costanza e Peso corporeo, calendario. Sistemare gli stili se serve. I test non giudicano l'aspetto.
-2. Prova reale del promemoria su Android: nei test c'è un plugin finto, quindi l'avviso vero sul telefono non è verificato.
-3. Unire il ramo in `main`, push, CI verde, APK da provare sul telefono.
-4. Aggiornare questo file con lo stato finale e ripulire questa sezione.
-5. Poi scegliere le prossime idee tra quelle non scelte.
+**Verifiche fatte:** 9 gruppi di test unitari e 15 suite e2e passano (allenamenti: 27 unitari + 23 e2e; i calcoli su settimane e ora legale sono provati in 5 fusi orari). Controllo visivo con screenshot a 390 px di panoramica, Costanza, Peso, calendario, sessione a 5 colonne, modulo esercizio: layout a posto.
 
-**Metodo di lavoro che ha funzionato:** nei test e2e di Allenamenti si può simulare l'app Android con un finto `window.Capacitor`; per leggere un errore della CI si usano le annotazioni via API (i log completi sono bloccati per me). Nei comandi di shell evitare `${PIPESTATUS[0]}`: la shell `sh` abortisce la riga e salta i comandi successivi.
+**Da fare:**
+1. Prova reale del promemoria sull'Android dell'utente: nei test c'è un plugin finto, quindi l'avviso vero (permesso notifiche, orario, ripetizione settimanale) non è verificato.
+2. Provare l'APK sul telefono e raccogliere impressioni su maniglie, RPE e schede nuove.
+3. Idee non ancora scelte: timer di recupero, «ultima volta» con serie pre-compilate, record personali, duplica giornata, backup/esportazione dello storico.
+4. Piccole rifiniture possibili: la scheda esercizio fuori sessione non mostra i tipi di serie (riscaldamento/drop); nella panoramica «1 sessioni» andrebbe al singolare.
+
+**Metodo di lavoro che ha funzionato:** nei test e2e di Allenamenti si può simulare l'app Android con un finto `window.Capacitor`; per leggere un errore della CI si usano le annotazioni via API (i log completi sono bloccati per me); per giudicare l'aspetto si fanno screenshot con Playwright a 390 px e un orologio fisso. Nei comandi di shell evitare `${PIPESTATUS[0]}`: la shell `sh` abortisce la riga e salta i comandi successivi.
