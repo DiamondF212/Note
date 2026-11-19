@@ -104,16 +104,14 @@ Scelte dell'utente tra le idee proposte: note, costanza, tipi di serie e RPE, pe
 - **Tipi di serie e RPE:** in sessione si tocca il numero della serie per passare da normale a riscaldamento a drop set (`set.type` solo se non normale); RPE da 1 a 10 a passi di 0,5 (`set.rpe`). Il riscaldamento conta tra le serie fatte ma non nel volume né nei grafici dei progressi.
 - **Note:** nota fissa dell'esercizio (nel modulo), «nota di oggi» per esercizio e nota della sessione; restano nella cronologia.
 - **Costanza:** settimane consecutive con almeno una sessione (lunedì–domenica, la settimana in corso non spezza la serie), pallini della settimana, calendario mensile con le sessioni del giorno toccato.
-- **Promemoria:** una notifica settimanale per ogni giorno con giorno della settimana assegnato, all'ora scelta, con il plugin nativo `LocalNotifications` (id 7200–7206, `weekday` 1 = domenica come nel codice Android del plugin, `second: 0`). Nel browser non si attiva e lo spiega.
 - **Peso corporeo:** una misura al giorno (la seconda dello stesso giorno sostituisce la prima), variazione dall'ultima, grafico dell'andamento, eliminazione di una misura.
-- Dati: `program.bodyWeights` e `program.reminder` sono campi nuovi della scheda, normalizzati al caricamento. Cache del service worker: `note-v23`.
+- Dati: `program.bodyWeights` è un campo nuovo della scheda, normalizzati al caricamento. Cache del service worker: `note-v23`.
 
 **Verifiche fatte:** 9 gruppi di test unitari e 15 suite e2e passano (allenamenti: 27 unitari + 23 e2e; i calcoli su settimane e ora legale sono provati in 5 fusi orari). Controllo visivo con screenshot a 390 px di panoramica, Costanza, Peso, calendario, sessione a 5 colonne, modulo esercizio: layout a posto.
 
 **Da fare:**
-1. Prova reale del promemoria sull'Android dell'utente: nei test c'è un plugin finto, quindi l'avviso vero (permesso notifiche, orario, ripetizione settimanale) non è verificato.
-2. Provare l'APK sul telefono e raccogliere impressioni su maniglie, RPE e schede nuove.
-3. Idee non ancora scelte: timer di recupero, «ultima volta» con serie pre-compilate, record personali, duplica giornata, backup/esportazione dello storico.
+1. Provare l'APK sul telefono e raccogliere impressioni su maniglie, RPE e schede nuove.
+2. Idee non ancora scelte: timer di recupero, «ultima volta» con serie pre-compilate, record personali, duplica giornata, backup/esportazione dello storico.
 4. Piccole rifiniture possibili: la scheda esercizio fuori sessione non mostra i tipi di serie (riscaldamento/drop); nella panoramica «1 sessioni» andrebbe al singolare.
 
 **Metodo di lavoro che ha funzionato:** nei test e2e di Allenamenti si può simulare l'app Android con un finto `window.Capacitor`; per leggere un errore della CI si usano le annotazioni via API (i log completi sono bloccati per me); per giudicare l'aspetto si fanno screenshot con Playwright a 390 px e un orologio fisso. Nei comandi di shell evitare `${PIPESTATUS[0]}`: la shell `sh` abortisce la riga e salta i comandi successivi.
@@ -126,4 +124,4 @@ Richieste dall'utente, nell'ordine: 1) backup importabile, 2) riscaldamento sugg
 - **Gruppo muscolare**: ogni esercizio può avere un gruppo (Petto, Dorso, Spalle, Bicipiti, Tricipiti, Gambe, Glutei, Addome, Altro). La panoramica mostra le serie di lavoro degli ultimi 7 giorni per gruppo. Il riscaldamento non conta.
 - **Massimale stimato**: nella scheda progressi di un esercizio, formula di Epley sulla serie migliore, fino a 12 ripetizioni.
 - Test: `tests/workouts.unit.test.js` ha 34 casi per la logica nuova. Le verifiche end-to-end le esegue la CI.
-- Da provare su Android: promemoria (ancora in attesa), esportazione del file e importazione.
+- Da provare su Android: esportazione del file e importazione.
