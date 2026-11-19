@@ -156,7 +156,10 @@
         c.thumb.replaceChildren(cv);
         c.rk = rk;
         c.el.dataset.done = '1';
-      } catch (x) { console.error(x); }
+      } catch (x) {
+        // Chiudendo la schermata il PDF viene distrutto e il disegno in corso si annulla: non è un errore.
+        if (!dead && !(x && x.name === 'RenderingCancelledException')) console.error(x);
+      }
     }
     async function pump() {
       if (pumping) return;
