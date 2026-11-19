@@ -95,3 +95,18 @@ Voce «Allenamenti» nel dock della home (`workouts.js`, `N.workouts`, stili `.w
 - **Scelte confermate dall'utente:** lo split (giorni numerati o giorni della settimana, facoltativi) e l'animazione della spunta restano come sono.
 - **Attenzione:** quando si cambia un file in cache, aggiornare la versione in `sw.js` (ora `note-v22`) e il test `tests/tools.e2e.test.js`. Nei test e2e, dopo aver creato una giornata aspettare `.workout-day-title` prima di usare `page.goBack()`.
 - **CI (GitHub Actions «Test e APK»):** dal 18/11 il lavoro `test` era rosso con «exit code 2» per un'eccezione non gestita in `tests/pdf_pages.e2e.test.js` («errori in console: RenderingCancelledException»), non per gli allenamenti. Corretto in `pdf_pages.js` (`renderThumb` ignora l'annullamento del disegno se la schermata è chiusa). Per leggere l'errore di un test fallito in CI: i log si scaricano solo dal sito GitHub; dall'API si leggono le annotazioni del job. Il codice di uscita 2 indica un'eccezione fuori dai singoli test, l'1 un test fallito.
+
+### Stato verificato (19/11/2026)
+Su `main` (dopo `b46187a`): test unitari e 15 suite e2e passano in locale e la CI «Test e APK» è verde (test + APK).
+
+### Idee proposte per Allenamenti (in attesa di scelta dell'utente, nulla ancora implementato)
+Già presenti nell'app e riusabili: timer con allarmi su Android (`tools.js`, `ANDROID-TIMER.md`), esportazione (`export.js`), creazione PDF (`pdf_new.js`).
+1. Timer di recupero tra le serie (parte quando si spunta una serie).
+2. Record personali con badge e animazione (carico massimo, ripetizioni, 1RM stimato).
+3. «Ultima volta» su ogni esercizio e serie pre-compilate dall'ultima sessione.
+4. Note per esercizio e per sessione.
+5. Duplica giornata e copia di una sessione precedente.
+6. Costanza: serie di settimane allenate, calendario delle sessioni, promemoria.
+7. Backup/esportazione dello storico (CSV o PDF).
+8. Tipi di serie (riscaldamento, drop set) e RPE.
+9. Peso corporeo nel tempo.
