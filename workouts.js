@@ -5,6 +5,11 @@
   const STORE_ID = 'program';
   const WEEKDAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
   const MAX_SETS = 20, MAX_REPS = 100, MAX_KG = 1000;
+  const SET_TYPES = ['normal', 'warmup', 'drop'];
+  const SET_TYPE_LABEL = { normal: 'Normale', warmup: 'Riscaldamento', drop: 'Drop set' };
+  const SET_TYPE_SHORT = { warmup: 'risc.', drop: 'drop' };
+  const MAX_EX_NOTE = 200, MAX_NOTE = 300, MAX_SESSION_NOTE = 500;
+  const REMINDER_BASE = 7200;
   let ctx = null, saveChain = Promise.resolve();
   const state = { program: null, ui: null, selectedDayId: null };
 
@@ -18,6 +23,32 @@
     return Number.isFinite(n) && n >= 0 && n <= MAX_KG ? Math.round(n * 10) / 10 : fallback;
   }
   function copy(value) { return JSON.parse(JSON.stringify(value)); }
+  function cleanType(value) { return SET_TYPES.includes(value) ? value : 'normal'; }
+  function cleanNote(value, max) { return String(value == null ? '' : value).replace(/\r/g, '').trim().slice(0, max || MAX_NOTE); }
+  // RPE da 1 a 10 con passi di 0,5; vuoto o non valido = nessun valore.
+  function cleanRpe(value) {
+    if (value === '' || value == null) return null;
+    const n = Number(String(value).replace(',', '.'));
+    return Number.isFinite(n) && n >= 1 && n <= 10 ? Math.round(n * 2) / 2 : null;
+  }
+  // Ripetizioni e tipo di ogni serie: se l'esercizio non ha valori per serie vale il valore unico `reps`.
+  function repsFor(ex, i) {
+    const own = ex && Array.isArray(ex.setReps) ? ex.setReps[i] : null;
+    return whole(own, whole(ex && ex.reps, 10, 1, MAX_REPS), 1, MAX_REPS);
+  }
+  function typeFor(ex, i) { return cleanType(ex && Array.isArray(ex.setTypes) ? ex.setTypes[i] : null); }
+  function repsList(ex) { return Array.from({ length: whole(ex && ex.setCount, 3, 1, MAX_SETS) }, (_, i) => repsFor(ex, i)); }
+  // «3 × 10» se uguali, altrimenti «12 · 10 · 8».
+  function repsSummary(ex) {
+    const list = repsList(ex);
+    return list.every((r) => r === list[0]) ? list.length + ' × ' + list[0] : list.join(' · ');
+  }
+  function makeSet(ex, i) {
+    const set = { reps: repsFor(ex, i), kg: ex.kg, done: false };
+    const type = typeFor(ex, i);
+    if (type !== 'normal') set.type = type;
+    return set;
+  }
   function normalizeProgram(raw) {
     const p = raw && typeof raw === 'object' ? raw : {};
     return {
@@ -25,22 +56,51 @@
       days: Array.isArray(p.days) ? p.days.filter((d) => d && d.id).map((d) => ({
         id: String(d.id), name: cleanName(d.name) || 'Giornata', weekday: WEEKDAYS.includes(d.weekday) ? d.weekday : '',
         created: Number(d.created) || Date.now(),
-        exercises: Array.isArray(d.exercises) ? d.exercises.filter((e) => e && e.id).map((e) => ({
-          id: String(e.id), name: cleanName(e.name) || 'Esercizio',
-          setCount: whole(e.setCount, 3, 1, MAX_SETS), reps: whole(e.reps, 10, 1, MAX_REPS), kg: weight(e.kg, 0)
-        })) : [],
+        exercises: Array.isArray(d.exercises) ? d.exercises.filter((e) => e && e.id).map(normalizeExercise) : [],
         activeSession: d.activeSession && Array.isArray(d.activeSession.exercises) ? d.activeSession : null
       })) : [],
       sessions: Array.isArray(p.sessions) ? p.sessions.filter((s) => s && s.id && Array.isArray(s.exercises)) : [],
+      bodyWeights: (Array.isArray(p.bodyWeights) ? p.bodyWeights : [])
+        .map((w) => ({ t: Number(w && w.t), kg: bodyWeight(w && w.kg) }))
+        .filter((w) => Number.isFinite(w.t) && w.t > 0 && w.kg != null)
+        .sort((a, b) => a.t - b.t),
+      reminder: normalizeReminder(p.reminder),
       updated: Number(p.updated) || Date.now()
     };
+  }
+  // I campi nuovi (ripetizioni per serie, tipi, nota) ci sono solo se servono: le schede vecchie restano identiche.
+  function normalizeExercise(e) {
+    const setCount = whole(e.setCount, 3, 1, MAX_SETS), reps = whole(e.reps, 10, 1, MAX_REPS);
+    const out = { id: String(e.id), name: cleanName(e.name) || 'Esercizio', setCount, reps, kg: weight(e.kg, 0) };
+    if (Array.isArray(e.setReps)) {
+      const list = Array.from({ length: setCount }, (_, i) => whole(e.setReps[i], reps, 1, MAX_REPS));
+      if (!list.every((r) => r === list[0])) out.setReps = list;
+      else out.reps = list[0];
+    }
+    if (Array.isArray(e.setTypes)) {
+      const list = Array.from({ length: setCount }, (_, i) => cleanType(e.setTypes[i]));
+      if (list.some((t) => t !== 'normal')) out.setTypes = list;
+    }
+    const note = cleanNote(e.note, MAX_EX_NOTE);
+    if (note) out.note = note;
+    return out;
+  }
+  function normalizeReminder(r) {
+    const raw = r && typeof r === 'object' ? r : {};
+    return { enabled: raw.enabled === true, time: parseTime(raw.time) ? raw.time : '18:00' };
+  }
+  function parseTime(value) {
+    const m = /^(\d{2}):(\d{2})$/.exec(String(value || ''));
+    if (!m) return null;
+    const hour = Number(m[1]), minute = Number(m[2]);
+    return hour < 24 && minute < 60 ? { hour, minute } : null;
   }
   function makeSession(day, id, startedAt) {
     return {
       id, dayId: day.id, dayName: day.name, startedAt,
       exercises: (day.exercises || []).map((ex) => ({
         exerciseId: ex.id, name: ex.name,
-        sets: Array.from({ length: whole(ex.setCount, 3, 1, MAX_SETS) }, () => ({ reps: ex.reps, kg: ex.kg, done: false }))
+        sets: Array.from({ length: whole(ex.setCount, 3, 1, MAX_SETS) }, (_, i) => makeSet(ex, i))
       }))
     };
   }
@@ -50,7 +110,8 @@
     return {
       totalSets: sets.length,
       completedSets: done.length,
-      volume: done.reduce((sum, s) => sum + (Number(s.reps) || 0) * (Number(s.kg) || 0), 0)
+      // Le serie di riscaldamento si contano tra quelle fatte ma non nel volume.
+      volume: done.filter((s) => s.type !== 'warmup').reduce((sum, s) => sum + (Number(s.reps) || 0) * (Number(s.kg) || 0), 0)
     };
   }
   function recentCount(sessions, now, days) {
@@ -70,7 +131,7 @@
     const out = [];
     ((program && program.sessions) || []).forEach((s) => {
       const ex = (s.exercises || []).find((e) => e.exerciseId === exerciseId);
-      const done = ex ? (ex.sets || []).filter((x) => x && x.done && Number.isFinite(Number(x.kg))) : [];
+      const done = ex ? (ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup' && Number.isFinite(Number(x.kg))) : [];
       if (!done.length) return;
       const best = done.reduce((a, b) => {
         const ka = Number(a.kg), kb = Number(b.kg);
@@ -80,6 +141,85 @@
     });
     return out.sort((a, b) => a.t - b.t);
   }
+  // ---- Costanza: settimane da lunedì a domenica nel fuso orario del telefono ----
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function dayKey(ts) { const d = new Date(ts); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function startOfWeek(ts) {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return d.getTime();
+  }
+  function sessionTime(s) { return Number(s && (s.completedAt || s.startedAt)) || 0; }
+  // Settimane consecutive con almeno una sessione. La settimana in corso non spezza la serie se ancora senza sessioni.
+  function weekStreak(sessions, now) {
+    const weeks = new Set((sessions || []).map(sessionTime).filter((t) => t > 0).map(startOfWeek));
+    const d = new Date(startOfWeek(now == null ? Date.now() : now));
+    let streak = weeks.has(d.getTime()) ? 1 : 0;
+    for (let guard = 0; guard < 1500; guard++) {
+      d.setDate(d.getDate() - 7);
+      if (!weeks.has(d.getTime())) break;
+      streak++;
+    }
+    return streak;
+  }
+  // I sette giorni della settimana in corso: quali con allenamento e quale è oggi.
+  function weekDots(sessions, now) {
+    const t = now == null ? Date.now() : now;
+    const trained = new Set((sessions || []).map(sessionTime).filter((x) => x > 0).map(dayKey));
+    const d = new Date(startOfWeek(t));
+    const today = dayKey(t);
+    return WEEKDAYS.map((name) => {
+      const key = dayKey(d.getTime());
+      const item = { name, letter: name[0], key, done: trained.has(key), today: key === today };
+      d.setDate(d.getDate() + 1);
+      return item;
+    });
+  }
+  // Celle di un mese (lunedì per primo): null per i vuoti iniziali, altrimenti { day, key, count }.
+  function monthGrid(year, month, sessions) {
+    const counts = new Map();
+    (sessions || []).map(sessionTime).filter((t) => t > 0).forEach((t) => { const k = dayKey(t); counts.set(k, (counts.get(k) || 0) + 1); });
+    const lead = (new Date(year, month, 1).getDay() + 6) % 7;
+    const total = new Date(year, month + 1, 0).getDate();
+    const cells = Array.from({ length: lead }, () => null);
+    for (let day = 1; day <= total; day++) {
+      const key = year + '-' + pad2(month + 1) + '-' + pad2(day);
+      cells.push({ day, key, count: counts.get(key) || 0 });
+    }
+    return cells;
+  }
+  // ---- Peso corporeo ----
+  function bodyWeight(value) {
+    const n = Number(String(value == null ? '' : value).replace(',', '.'));
+    return Number.isFinite(n) && n >= 20 && n <= 400 ? Math.round(n * 10) / 10 : null;
+  }
+  // Una sola misura per giorno: se ne registri un'altra lo stesso giorno sostituisce la precedente.
+  function upsertBodyWeight(list, t, kg) {
+    const key = dayKey(t);
+    return (list || []).filter((w) => dayKey(w.t) !== key).concat([{ t, kg }]).sort((a, b) => a.t - b.t);
+  }
+  // Da 'AAAA-MM-GG' a mezzogiorno di quel giorno (evita problemi di fuso e ora legale).
+  function dateInputToTime(value) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0);
+    return d.getFullYear() === Number(m[1]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3]) ? d.getTime() : null;
+  }
+  // ---- Promemoria: una notifica a settimana per ogni giorno della settimana assegnato ----
+  // `weekday` segue la convenzione di Capacitor (1 = domenica … 7 = sabato).
+  function reminderPlan(program) {
+    const byWeekday = new Map();
+    ((program && program.days) || []).forEach((day) => {
+      const i = WEEKDAYS.indexOf(day.weekday);
+      if (i < 0) return;
+      if (!byWeekday.has(i)) byWeekday.set(i, []);
+      byWeekday.get(i).push(day.name);
+    });
+    return Array.from(byWeekday.entries()).sort((a, b) => a[0] - b[0])
+      .map(([i, names]) => ({ id: REMINDER_BASE + i, weekday: ((i + 1) % 7) + 1, label: WEEKDAYS[i], names }));
+  }
+
   function escAttr(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -316,6 +456,7 @@
     if (!ctx) throw new Error('Allenamenti non inizializzati');
     if (state.ui) { render(); return state.ui; }
     await load();
+    refreshReminders();
     const ui = makeScreen();
     render();
     return ui;
@@ -397,6 +538,8 @@
         ctx.h('b', null, fmtKg(stats.volume) + ' kg')
       ));
     }
+    renderConsistency(body);
+    renderBodyWeight(body);
   }
 
   function renderDay(body, day) {
@@ -416,6 +559,7 @@
       ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, active ? 'SESSIONE' : 'LA TUA SCHEDA'), ctx.h('h3', null, active ? 'Registra le serie' : 'Esercizi')),
       ctx.h('button', { class: 'workout-add-exercise', 'data-workout-add-exercise': '1', onclick: () => openExerciseForm(day.id) }, ctx.h('span', { html: ctx.I('plus', 17) }), 'Aggiungi')
     ));
+    if (active && exerciseCount) body.append(ctx.h('p', { class: 'hint workout-set-hint' }, 'Tocca il numero di una serie per segnarla come riscaldamento o drop set. RPE: quanto è stata faticosa, da 1 a 10.'));
     if (!exerciseCount) {
       body.append(ctx.h('section', { class: 'workout-empty compact' },
         ctx.h('h3', null, 'Nessun esercizio ancora'),
@@ -428,6 +572,7 @@
       if (exerciseCount > 1) makeSortable(list, '.workout-exercise-card', '.workout-grip', (el) => el.dataset.workoutExercise, (ids) => applyExerciseOrder(day, ids));
     }
     if (active) {
+      body.append(sessionNoteField(active, 'Nota della sessione', 'session'));
       body.append(ctx.h('div', { class: 'workout-session-summary', id: 'workout-session-summary' }, summaryText(sessionStats(active))));
       body.append(ctx.h('div', { class: 'workout-footer' },
         ctx.h('button', { class: 'btn pri workout-finish', 'data-workout-finish': '1', onclick: () => finishSession(day) }, 'Concludi sessione')
@@ -446,6 +591,11 @@
   function summaryText(stats) {
     return stats.completedSets + ' / ' + stats.totalSets + ' serie completate · ' + fmtKg(stats.volume) + ' kg di volume';
   }
+  function exerciseSummary(ex) {
+    const list = repsList(ex);
+    const same = list.every((r) => r === list[0]);
+    return ex.setCount + ' serie · ' + (same ? list[0] : list.join('/')) + ' rip · ' + fmtKg(ex.kg) + ' kg';
+  }
   function renderExercise(day, ex, active) {
     const current = active && active.exercises.find((item) => item.exerciseId === ex.id);
     const card = ctx.h('article', { class: 'workout-exercise-card', 'data-workout-exercise': ex.id });
@@ -453,30 +603,36 @@
       ctx.h('div', { class: 'workout-exercise-icon', html: ctx.I('dumbbell', 18) }),
       ctx.h('div', { class: 'workout-exercise-name' },
         ctx.h('strong', null, ex.name),
-        ctx.h('small', null, ex.setCount + ' serie · ' + ex.reps + ' rip · ' + fmtKg(ex.kg) + ' kg')
+        ctx.h('small', null, exerciseSummary(ex))
       ),
       ctx.ibtn('more', () => exerciseOptions(day.id, ex.id), 'Opzioni di ' + ex.name, 'workout-exercise-more'),
       day.exercises.length > 1 ? gripButton('Riordina ' + ex.name) : null
     ));
+    if (ex.note) card.append(ctx.h('p', { class: 'workout-exercise-note', 'data-exercise-fixed-note': '1' }, ctx.h('span', { html: ctx.I('edit', 14) }), ex.note));
     if (!active || !current) {
       card.append(ctx.h('div', { class: 'workout-target-row' },
         ctx.h('span', null, 'Obiettivo'),
-        ctx.h('strong', null, ex.setCount + ' × ' + ex.reps),
+        ctx.h('strong', null, repsSummary(ex)),
         ctx.h('b', null, fmtKg(ex.kg) + ' kg')
       ));
       return card;
     }
     card.append(ctx.h('div', { class: 'workout-set-head' },
-      ctx.h('span', null, 'SERIE'), ctx.h('span', null, 'RIP'), ctx.h('span', null, 'KG'), ctx.h('span', { class: 'workout-done-head' }, 'OK')
+      ctx.h('span', null, 'SERIE'), ctx.h('span', null, 'RIP'), ctx.h('span', null, 'KG'), ctx.h('span', null, 'RPE'), ctx.h('span', { class: 'workout-done-head' }, 'OK')
     ));
     current.sets.forEach((set, index) => {
-      const row = ctx.h('div', { class: 'workout-set-row' + (set.done ? ' completed' : ''), 'data-workout-set': index });
-      row.append(ctx.h('span', { class: 'workout-set-number' }, String(index + 1).padStart(2, '0')));
+      const row = ctx.h('div', { class: 'workout-set-row' + (set.done ? ' completed' : ''), 'data-workout-set': index, 'data-type': cleanType(set.type) });
+      const badge = ctx.h('button', { class: 'workout-set-number', type: 'button', 'data-set-type': '1' });
+      paintBadge(badge, index, set);
+      badge.addEventListener('click', () => cycleSetType(day, current, index, badge));
+      row.append(badge);
       const reps = ctx.h('input', { class: 'workout-number', type: 'number', min: '1', max: String(MAX_REPS), step: '1', inputmode: 'numeric', value: set.reps, 'aria-label': 'Ripetizioni serie ' + (index + 1), 'data-set-reps': '1' });
       reps.addEventListener('change', () => updateSet(day, current, index, 'reps', whole(reps.value, set.reps, 1, MAX_REPS)));
       const kg = ctx.h('input', { class: 'workout-number', type: 'number', min: '0', max: String(MAX_KG), step: '0.5', inputmode: 'decimal', value: set.kg, 'aria-label': 'Carico in kg serie ' + (index + 1), 'data-set-kg': '1' });
       kg.addEventListener('change', () => updateSet(day, current, index, 'kg', weight(kg.value, set.kg)));
-      row.append(reps, kg);
+      const rpe = ctx.h('input', { class: 'workout-number workout-rpe', type: 'number', min: '1', max: '10', step: '0.5', inputmode: 'decimal', placeholder: '–', value: set.rpe == null ? '' : set.rpe, 'aria-label': 'RPE serie ' + (index + 1), 'data-set-rpe': '1' });
+      rpe.addEventListener('change', () => { const value = cleanRpe(rpe.value); rpe.value = value == null ? '' : value; updateSet(day, current, index, 'rpe', value); });
+      row.append(reps, kg, rpe);
       row.append(ctx.h('button', {
         class: 'workout-set-done' + (set.done ? ' is-done' : ''), type: 'button',
         'data-set-done': '1', 'aria-label': (set.done ? 'Annulla ' : 'Completa ') + 'serie ' + (index + 1),
@@ -485,11 +641,48 @@
       }, ctx.h('span', { html: ctx.I('check', 17) })));
       card.append(row);
     });
+    card.append(sessionNoteField(current, 'Nota di oggi su questo esercizio', 'exercise'));
     return card;
+  }
+  function paintBadge(badge, index, set) {
+    const type = cleanType(set.type);
+    badge.replaceChildren(ctx.h('b', null, String(index + 1).padStart(2, '0')));
+    if (type !== 'normal') badge.append(ctx.h('em', null, SET_TYPE_SHORT[type]));
+    badge.setAttribute('aria-label', 'Serie ' + (index + 1) + ', ' + SET_TYPE_LABEL[type].toLowerCase() + '. Tocca per cambiare il tipo');
+    if (badge.parentElement) badge.parentElement.dataset.type = type;
+  }
+  function cycleSetType(day, current, index, badge) {
+    const set = current.sets[index];
+    if (!set) return;
+    const next = SET_TYPES[(SET_TYPES.indexOf(cleanType(set.type)) + 1) % SET_TYPES.length];
+    if (next === 'normal') delete set.type; else set.type = next;
+    paintBadge(badge, index, set);
+    if (navigator.vibrate) navigator.vibrate(8);
+    save().catch(onSaveError);
+    refreshSessionSummary(day);
+  }
+  // Nota libera: `kind` 'exercise' = nota di oggi su un esercizio della sessione, 'session' = nota dell'intera sessione.
+  function sessionNoteField(target, label, kind) {
+    const max = kind === 'session' ? MAX_SESSION_NOTE : MAX_NOTE;
+    const attrs = { class: 'field workout-note', rows: kind === 'session' ? '3' : '2', maxlength: String(max), placeholder: kind === 'session' ? 'Com’è andata? Sensazioni, energia, sonno… (facoltativa)' : 'es. spalla fastidiosa, ho cambiato presa', 'aria-label': label };
+    attrs['data-' + kind + '-note'] = '1';
+    const area = ctx.h('textarea', attrs);
+    area.value = target.note || '';
+    area.addEventListener('input', () => { const value = cleanNote(area.value, max); if (value) target.note = value; else delete target.note; });
+    area.addEventListener('change', () => save().catch(onSaveError));
+    if (kind === 'session') return ctx.h('label', { class: 'workout-note-card' }, ctx.h('span', null, label), area);
+    area.hidden = !target.note;
+    const toggleText = document.createTextNode('');
+    const paintLabel = () => { toggleText.nodeValue = (!area.hidden || target.note) ? 'Nota di oggi' : 'Aggiungi una nota'; };
+    const toggle = ctx.h('button', { class: 'workout-note-toggle', type: 'button', 'data-exercise-note-toggle': '1', onclick: () => { area.hidden = !area.hidden; paintLabel(); if (!area.hidden) area.focus(); } },
+      ctx.h('span', { html: ctx.I('edit', 15) }), toggleText);
+    area.addEventListener('input', paintLabel);
+    paintLabel();
+    return ctx.h('div', { class: 'workout-note-wrap' }, toggle, area);
   }
   function updateSet(day, current, index, key, value) {
     if (!current.sets[index]) return;
-    current.sets[index][key] = value;
+    if (value == null) delete current.sets[index][key]; else current.sets[index][key] = value;
     save().catch(onSaveError);
     refreshSessionSummary(day);
   }
@@ -540,12 +733,16 @@
         ctx.h('span', { class: 'workout-history-check', html: ctx.I('check', 16) }),
         ctx.h('span', { class: 'workout-history-copy' },
           ctx.h('strong', null, fmtDate(session.completedAt, true)),
-          ctx.h('small', null, stats.completedSets + ' serie · ' + fmtKg(stats.volume) + ' kg')
+          ctx.h('small', null, stats.completedSets + ' serie · ' + fmtKg(stats.volume) + ' kg' + (session.note ? ' · con nota' : ''))
         ),
         ctx.h('span', { class: 'workout-chevron', 'aria-hidden': 'true' }, '›')
       ));
     });
     body.append(list);
+  }
+  function setText(set) {
+    const prefix = set.type === 'warmup' ? 'Risc. ' : set.type === 'drop' ? 'Drop ' : '';
+    return prefix + set.reps + ' × ' + fmtKg(set.kg) + ' kg' + (set.rpe != null ? ' · RPE ' + fmtNum(set.rpe) : '');
   }
   function showSession(session) {
     const body = ctx.h('div', { class: 'workout-session-details' });
@@ -553,15 +750,28 @@
     body.append(ctx.h('p', { class: 'hint' }, fmtDate(session.completedAt, true) + ' · ' + stats.completedSets + ' serie completate · ' + fmtKg(stats.volume) + ' kg'));
     (session.exercises || []).forEach((ex) => {
       const done = (ex.sets || []).filter((s) => s.done);
-      if (!done.length) return;
-      body.append(ctx.h('div', { class: 'workout-history-exercise' },
-        ctx.h('strong', null, ex.name),
-        ctx.h('small', null, done.map((s) => s.reps + ' × ' + fmtKg(s.kg) + ' kg').join('  ·  '))
-      ));
+      if (!done.length && !ex.note) return;
+      const box = ctx.h('div', { class: 'workout-history-exercise' }, ctx.h('strong', null, ex.name));
+      if (done.length) box.append(ctx.h('small', null, done.map(setText).join('  ·  ')));
+      if (ex.note) box.append(ctx.h('small', { class: 'workout-history-note' }, ex.note));
+      body.append(box);
     });
+    if (session.note) body.append(ctx.h('div', { class: 'workout-history-exercise' }, ctx.h('strong', null, 'Nota della sessione'), ctx.h('small', { class: 'workout-history-note' }, session.note)));
     ctx.openSheet(session.dayName || 'Allenamento', body);
   }
 
+  // Porta il cursore sul primo campo a pannello aperto, ma solo se l'utente non ha già scelto un altro campo
+  // (altrimenti ciò che sta scrivendo finirebbe nel campo sbagliato).
+  function focusSoon(getSheet, input, select) {
+    setTimeout(() => {
+      const sheet = getSheet();
+      const active = document.activeElement;
+      if (!sheet || !sheet.el.isConnected) return;
+      if (active && active !== document.body && sheet.el.contains(active)) return;
+      input.focus();
+      if (select) input.select();
+    }, 180);
+  }
   function openDayForm(existing) {
     const isEdit = !!existing;
     const name = ctx.h('input', { class: 'field', maxlength: '60', placeholder: 'es. Petto e tricipiti', value: existing ? existing.name : '', 'data-workout-day-name': '1', autocomplete: 'off' });
@@ -582,38 +792,71 @@
       )
     );
     sheet = ctx.openSheet(isEdit ? 'Modifica giornata' : 'Nuovo giorno', content);
-    setTimeout(() => name.focus(), 180);
+    focusSoon(() => sheet, name);
     async function saveDay() {
       const clean = cleanName(name.value);
       if (!clean) { error.textContent = 'Inserisci un nome per la giornata.'; name.focus(); return; }
       if (existing) {
         existing.name = clean; existing.weekday = weekday.value;
-        try { await save(); await sheet.close(); render(); ctx.toast('Giornata aggiornata'); }
+        try { await save(); refreshReminders(); await sheet.close(); render(); ctx.toast('Giornata aggiornata'); }
         catch (e) { onSaveError(e); }
         return;
       }
       const day = { id: ctx.uid(), name: clean, weekday: weekday.value, created: Date.now(), exercises: [], activeSession: null };
       state.program.days.push(day);
-      try { await save(); await sheet.close(); openDay(day.id); }
+      try { await save(); refreshReminders(); await sheet.close(); openDay(day.id); }
       catch (e) { onSaveError(e); }
     }
   }
   function openExerciseForm(dayId, existing) {
     const day = dayById(dayId);
     if (!day) return;
+    // Ripetizioni e tipo di ogni serie: le liste non si accorciano mentre si scrive, così cambiare il numero di serie non fa perdere i valori.
+    const repsAll = [], typesAll = [];
+    const startCount = existing ? existing.setCount : 3;
+    for (let i = 0; i < startCount; i++) { repsAll.push(existing ? repsFor(existing, i) : 10); typesAll.push(existing ? typeFor(existing, i) : 'normal'); }
+    function ensure(count, fill) { while (repsAll.length < count) { repsAll.push(fill); typesAll.push('normal'); } }
     const name = ctx.h('input', { class: 'field', maxlength: '60', placeholder: 'es. Panca piana', value: existing ? existing.name : '', 'data-workout-exercise-name': '1', autocomplete: 'off' });
-    const sets = ctx.h('input', { class: 'field', type: 'number', min: '1', max: String(MAX_SETS), step: '1', inputmode: 'numeric', value: existing ? existing.setCount : 3, 'data-workout-exercise-sets': '1' });
-    const reps = ctx.h('input', { class: 'field', type: 'number', min: '1', max: String(MAX_REPS), step: '1', inputmode: 'numeric', value: existing ? existing.reps : 10, 'data-workout-exercise-reps': '1' });
+    const sets = ctx.h('input', { class: 'field', type: 'number', min: '1', max: String(MAX_SETS), step: '1', inputmode: 'numeric', value: startCount, 'data-workout-exercise-sets': '1' });
+    const reps = ctx.h('input', { class: 'field', type: 'number', min: '1', max: String(MAX_REPS), step: '1', inputmode: 'numeric', value: existing ? repsAll[0] : 10, 'data-workout-exercise-reps': '1' });
     const kg = ctx.h('input', { class: 'field', type: 'number', min: '0', max: String(MAX_KG), step: '0.5', inputmode: 'decimal', value: existing ? existing.kg : 0, 'data-workout-exercise-kg': '1' });
+    const note = ctx.h('input', { class: 'field', maxlength: String(MAX_EX_NOTE), placeholder: 'es. sedile in posizione 4', value: existing && existing.note ? existing.note : '', 'data-workout-exercise-note': '1', autocomplete: 'off' });
+    const perSet = ctx.h('div', { class: 'workout-perset', 'data-workout-perset': '1' });
     const error = ctx.h('p', { class: 'err', role: 'alert' });
+    const currentCount = () => whole(sets.value, repsAll.length, 1, MAX_SETS);
+    function drawPerSet() {
+      const count = currentCount();
+      ensure(count, whole(reps.value, 10, 1, MAX_REPS));
+      perSet.replaceChildren();
+      for (let i = 0; i < count; i++) {
+        const input = ctx.h('input', { class: 'workout-number', type: 'number', min: '1', max: String(MAX_REPS), step: '1', inputmode: 'numeric', value: repsAll[i], 'aria-label': 'Ripetizioni serie ' + (i + 1), 'data-perset-reps': String(i) });
+        input.addEventListener('input', () => { const n = whole(input.value, null, 1, MAX_REPS); if (n != null) repsAll[i] = n; });
+        const type = ctx.h('select', { class: 'workout-type-select', 'aria-label': 'Tipo della serie ' + (i + 1), 'data-perset-type': String(i) },
+          ...SET_TYPES.map((t) => ctx.h('option', { value: t }, SET_TYPE_LABEL[t])));
+        type.value = typesAll[i];
+        type.addEventListener('change', () => { typesAll[i] = cleanType(type.value); });
+        perSet.append(ctx.h('div', { class: 'workout-perset-row' }, ctx.h('span', null, 'Serie ' + (i + 1)), input, type));
+      }
+    }
+    sets.addEventListener('input', drawPerSet);
+    reps.addEventListener('input', () => {
+      const n = whole(reps.value, null, 1, MAX_REPS);
+      if (n == null) return;
+      for (let i = 0; i < repsAll.length; i++) repsAll[i] = n;
+      drawPerSet();
+    });
+    drawPerSet();
     let sheet;
     const content = ctx.h('div', { class: 'workout-form' },
       ctx.h('label', null, 'Nome esercizio', name),
       ctx.h('div', { class: 'workout-form-grid' },
         ctx.h('label', null, 'Serie', sets),
-        ctx.h('label', null, 'Ripetizioni', reps),
+        ctx.h('label', null, 'Rip. di tutte', reps),
         ctx.h('label', null, 'Kg', kg)
       ),
+      ctx.h('div', { class: 'workout-perset-head' }, ctx.h('strong', null, 'Ripetizioni per serie'), ctx.h('small', null, 'Cambia le singole serie, ad esempio 12 · 10 · 8, o segnale come riscaldamento o drop set.')),
+      perSet,
+      ctx.h('label', null, 'Nota fissa (facoltativa)', note),
       ctx.h('p', { class: 'hint' }, 'Sono i valori di partenza: durante l’allenamento potrai registrarli serie per serie.'),
       error,
       ctx.h('div', { class: 'btns' },
@@ -622,30 +865,266 @@
       )
     );
     sheet = ctx.openSheet(existing ? 'Modifica esercizio' : 'Nuovo esercizio', content);
-    setTimeout(() => name.focus(), 180);
+    focusSoon(() => sheet, name);
     async function saveExercise() {
       const clean = cleanName(name.value);
       const count = whole(sets.value, null, 1, MAX_SETS);
-      const repCount = whole(reps.value, null, 1, MAX_REPS);
       const loadKg = weight(kg.value, null);
       if (!clean) { error.textContent = 'Inserisci il nome dell’esercizio.'; name.focus(); return; }
-      if (count == null || repCount == null || loadKg == null) { error.textContent = 'Serie, ripetizioni o carico non validi.'; return; }
+      if (count == null || loadKg == null) { error.textContent = 'Serie o carico non validi.'; return; }
+      ensure(count, whole(reps.value, 10, 1, MAX_REPS));
+      const list = repsAll.slice(0, count), types = typesAll.slice(0, count);
+      const ex = existing || { id: ctx.uid() };
+      ex.name = clean; ex.setCount = count; ex.kg = loadKg; ex.reps = list[0];
+      if (list.every((r) => r === list[0])) delete ex.setReps; else ex.setReps = list;
+      if (types.every((t) => t === 'normal')) delete ex.setTypes; else ex.setTypes = types;
+      const text = cleanNote(note.value, MAX_EX_NOTE);
+      if (text) ex.note = text; else delete ex.note;
+      const active = day.activeSession && day.activeSession.exercises.find((e) => e.exerciseId === ex.id);
       if (existing) {
-        existing.name = clean; existing.setCount = count; existing.reps = repCount; existing.kg = loadKg;
-        const active = day.activeSession && day.activeSession.exercises.find((e) => e.exerciseId === existing.id);
-        if (active) active.sets = Array.from({ length: count }, (_, i) => active.sets[i] || { reps: repCount, kg: loadKg, done: false });
+        if (active) { active.name = clean; active.sets = Array.from({ length: count }, (_, i) => active.sets[i] || makeSet(ex, i)); }
       } else {
-        const ex = { id: ctx.uid(), name: clean, setCount: count, reps: repCount, kg: loadKg };
         day.exercises.push(ex);
-        if (day.activeSession) day.activeSession.exercises.push({
-          exerciseId: ex.id, name: ex.name,
-          sets: Array.from({ length: count }, () => ({ reps: repCount, kg: loadKg, done: false }))
-        });
+        if (day.activeSession) day.activeSession.exercises.push({ exerciseId: ex.id, name: ex.name, sets: Array.from({ length: count }, (_, i) => makeSet(ex, i)) });
       }
       try { await save(); await sheet.close(); render(); ctx.toast(existing ? 'Esercizio aggiornato' : 'Esercizio aggiunto'); }
       catch (e) { onSaveError(e); }
     }
   }
+  /* ---------- Promemoria (notifiche di sistema nell'app Android) ---------- */
+  const REMINDER_TEXT = {
+    unsupported: 'I promemoria funzionano nell’app Android: da qui non posso avvisarti ad app chiusa.',
+    denied: 'Permesso per le notifiche negato: abilitalo dalle impostazioni del telefono.',
+    'no-days': 'Assegna un giorno della settimana ad almeno una giornata per ricevere il promemoria.',
+    error: 'Non sono riuscito a programmare il promemoria. Riprova.'
+  };
+  function nativeLN() {
+    try {
+      const C = window.Capacitor;
+      if (C && C.isNativePlatform && C.isNativePlatform()) return (C.Plugins && C.Plugins.LocalNotifications) || null;
+    } catch (e) { /* ignora */ }
+    return null;
+  }
+  // Riprogramma da zero gli avvisi: 'ok' | 'off' | 'unsupported' | 'no-days' | 'denied' | 'error'.
+  async function syncReminders() {
+    const LN = nativeLN();
+    if (!LN) return 'unsupported';
+    try {
+      await LN.cancel({ notifications: Array.from({ length: 7 }, (_, i) => ({ id: REMINDER_BASE + i })) });
+      const reminder = state.program.reminder;
+      if (!reminder.enabled) return 'off';
+      const plan = reminderPlan(state.program);
+      if (!plan.length) return 'no-days';
+      let perm = await LN.checkPermissions();
+      if (perm.display !== 'granted') perm = await LN.requestPermissions();
+      if (perm.display !== 'granted') return 'denied';
+      try { await LN.createChannel({ id: 'lmn-workout', name: 'Allenamenti', description: 'Promemoria dei giorni di allenamento', importance: 4, visibility: 1, vibration: true }); } catch (e) { /* canale già esistente */ }
+      const time = parseTime(reminder.time) || { hour: 18, minute: 0 };
+      await LN.schedule({ notifications: plan.map((item) => ({
+        id: item.id, title: 'È ora di allenarti', body: item.names.join(' · '), channelId: 'lmn-workout',
+        schedule: { on: { weekday: item.weekday, hour: time.hour, minute: time.minute }, allowWhileIdle: true },
+        extra: { tool: 'workout' }
+      })) });
+      return 'ok';
+    } catch (e) { console.warn('Promemoria allenamento non programmato', e); return 'error'; }
+  }
+  // Dopo aver cambiato i giorni della scheda: aggiorna gli avvisi solo se sono attivi.
+  function refreshReminders() {
+    if (state.program && state.program.reminder.enabled) syncReminders().catch(() => {});
+  }
+  async function applyReminder(patch) {
+    const reminder = state.program.reminder;
+    Object.assign(reminder, patch);
+    const result = await syncReminders();
+    const failed = reminder.enabled && result !== 'ok';
+    if (failed) reminder.enabled = false;
+    try { await save(); } catch (e) { onSaveError(e); }
+    render();
+    if (failed) ctx.toast(REMINDER_TEXT[result] || REMINDER_TEXT.error, 4200);
+    else if (patch.enabled === true) ctx.toast('Promemoria attivo alle ' + reminder.time + ' nei giorni assegnati');
+    else if (patch.enabled === false) ctx.toast('Promemoria disattivato');
+  }
+  function reminderHint(plan, reminder) {
+    if (!plan.length) return 'Assegna un giorno della settimana a una giornata per attivarlo.';
+    const days = plan.map((item) => item.label.slice(0, 3)).join(' · ');
+    return reminder.enabled ? days + ' alle ' + reminder.time : 'Ti avviso nei giorni assegnati: ' + days;
+  }
+
+  /* ---------- Costanza e calendario ---------- */
+  function renderConsistency(body) {
+    const sessions = state.program.sessions;
+    const streak = weekStreak(sessions);
+    const reminder = state.program.reminder;
+    const plan = reminderPlan(state.program);
+    const dots = ctx.h('div', { class: 'workout-week', role: 'list', 'aria-label': 'Settimana in corso' },
+      ...weekDots(sessions).map((d) => ctx.h('span', {
+        class: 'workout-week-dot' + (d.done ? ' done' : '') + (d.today ? ' today' : ''), role: 'listitem', 'data-day': d.key,
+        'aria-label': d.name + (d.done ? ': allenato' : '') + (d.today ? ' (oggi)' : '')
+      }, d.letter)));
+    const time = ctx.h('input', { class: 'workout-time', type: 'time', value: reminder.time, 'aria-label': 'Ora del promemoria', 'data-workout-reminder-time': '1' });
+    time.addEventListener('change', () => {
+      if (!parseTime(time.value)) { time.value = reminder.time; return; }
+      applyReminder({ time: time.value });
+    });
+    const toggle = ctx.h('button', {
+      class: 'workout-switch' + (reminder.enabled ? ' on' : ''), type: 'button', role: 'switch', 'aria-checked': String(reminder.enabled),
+      'aria-label': 'Promemoria dei giorni di allenamento', 'data-workout-reminder-toggle': '1',
+      onclick: () => applyReminder({ enabled: !reminder.enabled })
+    }, ctx.h('span', null));
+    body.append(ctx.h('section', { class: 'workout-card workout-consistency', 'data-workout-consistency': '1' },
+      ctx.h('div', { class: 'workout-card-head' },
+        ctx.h('span', { class: 'workout-card-icon', html: ctx.I('flame', 20) }),
+        ctx.h('div', null,
+          ctx.h('p', { class: 'workout-eyebrow' }, 'COSTANZA'),
+          ctx.h('h3', { 'data-workout-streak': String(streak) }, streak ? streak + (streak === 1 ? ' settimana di fila' : ' settimane di fila') : 'Inizia la tua serie')
+        )
+      ),
+      ctx.h('p', { class: 'workout-card-copy' }, streak ? 'Basta una sessione a settimana, da lunedì a domenica, per tenere viva la serie.' : 'Registra una sessione questa settimana per iniziare la serie.'),
+      dots,
+      ctx.h('button', { class: 'workout-link-btn', type: 'button', 'data-workout-calendar': '1', onclick: openCalendar }, ctx.h('span', { html: ctx.I('calendar', 17) }), 'Calendario delle sessioni'),
+      ctx.h('div', { class: 'workout-reminder' },
+        ctx.h('div', { class: 'workout-reminder-copy' }, ctx.h('strong', null, 'Promemoria'), ctx.h('small', { 'data-workout-reminder-hint': '1' }, reminderHint(plan, reminder))),
+        time, toggle
+      )
+    ));
+  }
+  function openCalendar() {
+    const now = new Date();
+    let year = now.getFullYear(), month = now.getMonth(), picked = null;
+    const box = ctx.h('div', { class: 'workout-calendar', 'data-workout-calendar-sheet': '1' });
+    function shift(delta) {
+      month += delta;
+      if (month < 0) { month = 11; year--; } else if (month > 11) { month = 0; year++; }
+      picked = null;
+      draw();
+    }
+    function draw() {
+      const cells = monthGrid(year, month, state.program.sessions);
+      const today = dayKey(Date.now());
+      const title = new Date(year, month, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+      const grid = ctx.h('div', { class: 'workout-cal-grid' });
+      WEEKDAYS.forEach((name) => grid.append(ctx.h('span', { class: 'workout-cal-wd', 'aria-hidden': 'true' }, name[0])));
+      cells.forEach((c) => {
+        if (!c) { grid.append(ctx.h('span', { class: 'workout-cal-empty' })); return; }
+        const cls = 'workout-cal-day' + (c.count ? ' has' : '') + (c.key === today ? ' today' : '') + (c.key === picked ? ' picked' : '');
+        if (!c.count) { grid.append(ctx.h('span', { class: cls, 'data-cal-day': c.key }, String(c.day))); return; }
+        grid.append(ctx.h('button', {
+          class: cls, type: 'button', 'data-cal-day': c.key, 'aria-pressed': String(c.key === picked),
+          'aria-label': c.day + ': ' + c.count + (c.count === 1 ? ' sessione' : ' sessioni'),
+          onclick: () => { picked = picked === c.key ? null : c.key; draw(); }
+        }, String(c.day)));
+      });
+      const total = cells.reduce((n, c) => n + (c ? c.count : 0), 0);
+      const list = ctx.h('div', { class: 'workout-cal-list' });
+      if (picked) {
+        state.program.sessions.filter((x) => dayKey(sessionTime(x)) === picked).sort((a, b) => sessionTime(b) - sessionTime(a)).forEach((x) => {
+          const stats = sessionStats(x);
+          list.append(ctx.h('button', { class: 'workout-history-row', type: 'button', 'data-cal-session': x.id, onclick: () => showSession(x) },
+            ctx.h('span', { class: 'workout-history-check', html: ctx.I('check', 16) }),
+            ctx.h('span', { class: 'workout-history-copy' }, ctx.h('strong', null, x.dayName || 'Allenamento'), ctx.h('small', null, stats.completedSets + ' serie · ' + fmtKg(stats.volume) + ' kg')),
+            ctx.h('span', { class: 'workout-chevron', 'aria-hidden': 'true' }, '›')));
+        });
+      } else {
+        list.append(ctx.h('p', { class: 'hint', 'data-cal-summary': '1' }, total ? total + (total === 1 ? ' sessione' : ' sessioni') + ' in questo mese · tocca un giorno evidenziato per vederle.' : 'Nessuna sessione in questo mese.'));
+      }
+      box.replaceChildren(
+        ctx.h('div', { class: 'workout-cal-head' },
+          ctx.h('button', { class: 'ibtn workout-cal-nav', type: 'button', 'data-cal-prev': '1', 'aria-label': 'Mese precedente', onclick: () => shift(-1) }, '‹'),
+          ctx.h('strong', { 'data-cal-title': '1' }, title.charAt(0).toUpperCase() + title.slice(1)),
+          ctx.h('button', { class: 'ibtn workout-cal-nav', type: 'button', 'data-cal-next': '1', 'aria-label': 'Mese successivo', onclick: () => shift(1) }, '›')
+        ),
+        grid, list
+      );
+    }
+    ctx.openSheet('Calendario allenamenti', box);
+    draw();
+  }
+
+  /* ---------- Peso corporeo ---------- */
+  function renderBodyWeight(body) {
+    const list = state.program.bodyWeights;
+    const last = list[list.length - 1], before = list[list.length - 2];
+    let copy = 'Registra il tuo peso per vederne l’andamento nel tempo.';
+    if (last) {
+      copy = fmtDate(last.t, true);
+      if (before) {
+        const delta = Math.round((last.kg - before.kg) * 10) / 10;
+        copy += ' · ' + (delta === 0 ? 'invariato' : (delta > 0 ? '+' : '−') + fmtKg(Math.abs(delta)) + ' kg') + ' rispetto alla misura precedente';
+      }
+    }
+    body.append(ctx.h('section', { class: 'workout-card workout-weight', 'data-workout-weight': '1' },
+      ctx.h('div', { class: 'workout-card-head' },
+        ctx.h('span', { class: 'workout-card-icon', html: ctx.I('scale', 20) }),
+        ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, 'PESO CORPOREO'), ctx.h('h3', { 'data-workout-weight-last': last ? String(last.kg) : '' }, last ? fmtKg(last.kg) + ' kg' : 'Nessuna misura'))
+      ),
+      ctx.h('p', { class: 'workout-card-copy' }, copy),
+      ctx.h('div', { class: 'workout-card-actions' },
+        ctx.h('button', { class: 'btn pri', type: 'button', 'data-workout-weight-add': '1', onclick: openWeightForm }, 'Registra peso'),
+        list.length ? ctx.h('button', { class: 'btn', type: 'button', 'data-workout-weight-trend': '1', onclick: openWeightTrend }, 'Andamento') : null
+      )
+    ));
+  }
+  function openWeightForm() {
+    const list = state.program.bodyWeights;
+    const last = list[list.length - 1];
+    const today = dayKey(Date.now());
+    const kg = ctx.h('input', { class: 'field', type: 'number', min: '20', max: '400', step: '0.1', inputmode: 'decimal', placeholder: 'es. 78,5', value: last ? last.kg : '', 'data-workout-weight-kg': '1' });
+    const date = ctx.h('input', { class: 'field', type: 'date', value: today, max: today, 'data-workout-weight-date': '1' });
+    const error = ctx.h('p', { class: 'err', role: 'alert' });
+    let sheet;
+    const content = ctx.h('div', { class: 'workout-form' },
+      ctx.h('label', null, 'Peso (kg)', kg),
+      ctx.h('label', null, 'Data', date),
+      ctx.h('p', { class: 'hint' }, 'Una misura al giorno: se ne registri un’altra nello stesso giorno sostituisce la precedente.'),
+      error,
+      ctx.h('div', { class: 'btns' },
+        ctx.h('button', { class: 'btn', onclick: () => sheet.close() }, 'Annulla'),
+        ctx.h('button', { class: 'btn pri', 'data-workout-weight-save': '1', onclick: saveWeight }, 'Salva')
+      )
+    );
+    sheet = ctx.openSheet('Registra il peso', content);
+    focusSoon(() => sheet, kg, true);
+    async function saveWeight() {
+      const value = bodyWeight(kg.value);
+      const t = dateInputToTime(date.value);
+      if (value == null) { error.textContent = 'Inserisci un peso tra 20 e 400 kg.'; kg.focus(); return; }
+      if (t == null || dayKey(t) > dayKey(Date.now())) { error.textContent = 'Scegli una data valida, non nel futuro.'; return; }
+      state.program.bodyWeights = upsertBodyWeight(state.program.bodyWeights, t, value);
+      try { await save(); await sheet.close(); render(); ctx.toast('Peso registrato'); }
+      catch (e) { onSaveError(e); }
+    }
+  }
+  function openWeightTrend() {
+    const box = ctx.h('div', { class: 'workout-progress workout-weight-trend', 'data-workout-weight-sheet': '1' });
+    function draw() {
+      const list = state.program.bodyWeights;
+      box.replaceChildren();
+      if (!list.length) { box.append(ctx.h('p', { class: 'hint' }, 'Nessuna misura registrata.')); return; }
+      const first = list[0], last = list[list.length - 1];
+      const change = Math.round((last.kg - first.kg) * 10) / 10;
+      box.append(ctx.h('p', { class: 'hint' }, list.length + (list.length === 1 ? ' misura' : ' misure') + (list.length > 1 ? ' · da ' + fmtKg(first.kg) + ' a ' + fmtKg(last.kg) + ' kg (' + (change > 0 ? '+' : change < 0 ? '−' : '') + fmtKg(Math.abs(change)) + ')' : '')));
+      if (list.length > 1) {
+        const points = list.map((w) => ({ label: fmtDate(w.t), kg: w.kg }));
+        box.append(ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(points, 'kg', 'Peso corporeo in kg') }));
+      } else {
+        box.append(ctx.h('p', { class: 'hint' }, 'Registra un’altra misura per vedere l’andamento.'));
+      }
+      const rows = ctx.h('div', { class: 'workout-weight-list' });
+      list.slice().reverse().forEach((w) => rows.append(ctx.h('div', { class: 'workout-weight-row', 'data-weight-row': dayKey(w.t) },
+        ctx.h('span', null, fmtDate(w.t, true)), ctx.h('strong', null, fmtKg(w.kg) + ' kg'),
+        ctx.ibtn('trash', () => removeWeight(w.t), 'Elimina la misura del ' + fmtDate(w.t, true), 'workout-weight-del'))));
+      box.append(rows);
+    }
+    async function removeWeight(t) {
+      state.program.bodyWeights = state.program.bodyWeights.filter((w) => w.t !== t);
+      try { await save(); } catch (e) { onSaveError(e); }
+      draw();
+      render();
+    }
+    ctx.openSheet('Andamento del peso', box);
+    draw();
+  }
+
   function openProgress(dayId, exerciseId) {
     const day = dayById(dayId);
     const ex = day && day.exercises.find((e) => e.id === exerciseId);
@@ -700,7 +1179,7 @@
       state.program.days = state.program.days.filter((d) => d.id !== day.id);
       state.program.sessions = state.program.sessions.filter((s) => s.dayId !== day.id);
       try {
-        await save(); await sheet.close();
+        await save(); refreshReminders(); await sheet.close();
         if (state.selectedDayId === day.id) await ctx.back();
         render(); ctx.toast('Giornata eliminata');
       } catch (e) { onSaveError(e); }
@@ -724,7 +1203,8 @@
     }
   }
 
-  const _logic = { cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
+  const _logic = { cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet,
+    dayKey, startOfWeek, weekStreak, weekDots, monthGrid, bodyWeight, upsertBodyWeight, dateInputToTime, reminderPlan, parseTime, SET_TYPES, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.workouts;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));
