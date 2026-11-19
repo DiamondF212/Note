@@ -71,6 +71,8 @@
     tools: '<path d="M14.5 6.5a4 4 0 005 5l-8.8 8.8a2.1 2.1 0 01-3-3z"/><path d="M14.5 6.5l3-3 3 3-3 3"/>',
     dumbbell: '<path d="M6 12h12M4 9v6M20 9v6M2 10v4M22 10v4"/>',
     chart: '<path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/>',
+    flame: '<path d="M12 3c.8 3.4 5 5 5 10a5 5 0 01-10 0c0-2 1-3.3 2.1-4.3.2 1.4.9 2.1 1.7 2.3C10.2 8.6 10.7 5.6 12 3z"/>',
+    scale: '<rect x="4" y="4" width="16" height="16" rx="4.5"/><path d="M8.3 9.2a5 5 0 017.4 0M12 9.8l1.8-1.9"/>',
     grip: '<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/>',
     ruler: '<rect x="2.5" y="8" width="19" height="8" rx="1.5"/><path d="M6 8v3M10 8v4M14 8v3M18 8v4"/>',
     percent: '<path d="M18 5L6 19"/><circle cx="7.5" cy="7.5" r="2.5"/><circle cx="16.5" cy="16.5" r="2.5"/>',
