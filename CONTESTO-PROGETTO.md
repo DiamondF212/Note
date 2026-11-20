@@ -116,12 +116,22 @@ Scelte dell'utente tra le idee proposte: note, costanza, tipi di serie e RPE, pe
 
 **Metodo di lavoro che ha funzionato:** nei test e2e di Allenamenti si può simulare l'app Android con un finto `window.Capacitor`; per leggere un errore della CI si usano le annotazioni via API (i log completi sono bloccati per me); per giudicare l'aspetto si fanno screenshot con Playwright a 390 px e un orologio fisso. Nei comandi di shell evitare `${PIPESTATUS[0]}`: la shell `sh` abortisce la riga e salta i comandi successivi.
 
-## Allenamenti v3 (in corso di consegna)
+## Allenamenti v3 (consegnata)
 Richieste dall'utente, nell'ordine: 1) backup importabile, 2) riscaldamento suggerito, 3) confronto tra sessioni, 4) volume settimanale per gruppo muscolare, 5) stima del massimale.
 - **Backup**: in fondo alla panoramica di Allenamenti, «Esporta» scarica un file JSON (`allenamenti-AAAA-MM-GG.json`); «Importa» legge il file, mostra quante giornate e sessioni contiene e, dopo conferma, sostituisce i dati attuali. Il formato è `{app, version: 1, exportedAt, program}`.
 - **Riscaldamento suggerito**: nella sessione in corso, sull'esercizio con carico ≥ 20 kg, un pulsante aggiunge tre serie di riscaldamento (50%, 70%, 85% del carico, arrotondati a 2,5 kg). Non si aggiunge due volte.
 - **Confronto**: nella giornata, la card «Confronto» mostra volume e carico massimo per esercizio rispetto alla sessione precedente dello stesso giorno. Stessa card nel dettaglio di ogni sessione.
 - **Gruppo muscolare**: ogni esercizio può avere un gruppo (Petto, Dorso, Spalle, Bicipiti, Tricipiti, Gambe, Glutei, Addome, Altro). La panoramica mostra le serie di lavoro degli ultimi 7 giorni per gruppo. Il riscaldamento non conta.
 - **Massimale stimato**: nella scheda progressi di un esercizio, formula di Epley sulla serie migliore, fino a 12 ripetizioni.
-- Test: `tests/workouts.unit.test.js` ha 34 casi per la logica nuova. Le verifiche end-to-end le esegue la CI.
+- Test v3: logica in `tests/workouts.unit.test.js`; interfaccia in `tests/workouts_v4.e2e.test.js` (backup, riscaldamento, confronto, massimale, gruppo muscolare).
 - Da provare su Android: esportazione del file e importazione.
+
+## Allenamenti v4 (progressione, sostituzioni, grafico, riepilogo)
+Richieste dall'utente: progressione automatica con spunta, riepilogo mensile, grafico del volume settimanale, sostituzione degli esercizi.
+- **Progressione automatica**: se le ultime 2 sessioni di un esercizio hanno raggiunto l'obiettivo attuale (serie normali tutte fatte, ripetizioni e carico almeno uguali, nessun RPE oltre 9), nella card esercizio compare un banner con una spunta. Regola: fino a 6 rip. sale il carico; da 7 a 11 rip. si aggiunge 1 ripetizione per serie; con tutte le serie a 12 o più sale il carico (+2,5 kg da 20 kg in su, +1 kg sotto) e le ripetizioni scendono (70%, minimo 8); a corpo libero si aggiungono ripetizioni fino a 30. La spunta aggiorna kg e ripetizioni dell'esercizio e, in sessione, le serie normali non ancora fatte; il toast ha «Annulla».
+- **Sostituzione**: tasto con le frecce accanto al nome dell'esercizio. Catalogo interno di circa 90 esercizi con gruppo, movimento e attrezzo (`CATALOG` in `workouts.js`); propone fino a 6 alternative dello stesso gruppo, prima lo stesso movimento con un altro attrezzo. Il carico di partenza è una stima prudente (bilanciere→manubri ×0,4, manubri→bilanciere ×2, altro cambio ×0,7). In sessione c'è «Solo oggi» (la scheda non cambia; la sessione salva `substitute: true` e storico, progressi e confronto la ignorano) oppure «Nella scheda» (nuovo esercizio con nuovo id; la cronologia vecchia resta). Con serie già fatte la sostituzione è bloccata fino a fine sessione.
+- **Grafico settimanale**: barre delle ultime 8 settimane (lunedì–domenica) nella panoramica, con la variazione rispetto alla settimana scorsa.
+- **Riepilogo mensile**: card «Riepilogo di <mese>» nella panoramica; apre un pannello con scorrimento tra i mesi (non oltre quello in corso): sessioni, volume, serie, giorni attivi, confronto col mese prima, giorni più frequenti, gruppi più allenati, miglior progresso (massimale stimato).
+- Test: 14 test unitari nuovi (48 in tutto per Allenamenti) e `tests/workouts_v4.e2e.test.js` (18 test), aggiunto a `npm run test:e2e`.
+- Limiti noti: il catalogo riconosce i nomi italiani più comuni; se il nome non è riconosciuto si sceglie il gruppo a mano nel pannello. Il carico dopo una sostituzione va comunque corretto alla prima serie.
+

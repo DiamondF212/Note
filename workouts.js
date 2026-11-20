@@ -132,7 +132,7 @@
   function exerciseHistory(program, exerciseId) {
     const out = [];
     ((program && program.sessions) || []).forEach((s) => {
-      const ex = (s.exercises || []).find((e) => e.exerciseId === exerciseId);
+      const ex = (s.exercises || []).find((e) => e.exerciseId === exerciseId && !e.substitute);
       const done = ex ? (ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup' && Number.isFinite(Number(x.kg))) : [];
       if (!done.length) return;
       const best = done.reduce((a, b) => {
@@ -540,7 +540,9 @@
         ctx.h('b', null, fmtKg(stats.volume) + ' kg')
       ));
     }
+    renderVolumeChart(body);
     renderWeeklyVolume(body);
+    renderMonthCard(body);
     renderConsistency(body);
     renderBodyWeight(body);
     renderBackup(body);
@@ -610,13 +612,16 @@
     card.append(ctx.h('div', { class: 'workout-exercise-top' },
       ctx.h('div', { class: 'workout-exercise-icon', html: ctx.I('dumbbell', 18) }),
       ctx.h('div', { class: 'workout-exercise-name' },
-        ctx.h('strong', null, ex.name),
-        ctx.h('small', null, exerciseSummary(ex))
+        ctx.h('strong', null, current ? current.name : ex.name),
+        ctx.h('small', null, current && current.substitute ? 'Oggi al posto di ' + ex.name : exerciseSummary(ex))
       ),
+      ctx.ibtn('swap', () => openSubstitute(day.id, ex.id), 'Sostituisci ' + ex.name, 'workout-exercise-swap'),
       ctx.ibtn('more', () => exerciseOptions(day.id, ex.id), 'Opzioni di ' + ex.name, 'workout-exercise-more'),
       day.exercises.length > 1 ? gripButton('Riordina ' + ex.name) : null
     ));
     if (ex.note) card.append(ctx.h('p', { class: 'workout-exercise-note', 'data-exercise-fixed-note': '1' }, ctx.h('span', { html: ctx.I('edit', 14) }), ex.note));
+    const suggestion = current && current.substitute ? null : progressionSuggestion(state.program, ex);
+    if (suggestion && !(current && current.sets.some((x) => x.done))) card.append(progressionBanner(day, ex, current, suggestion));
     if (!active || !current) {
       card.append(ctx.h('div', { class: 'workout-target-row' },
         ctx.h('span', null, 'Obiettivo'),
@@ -917,6 +922,207 @@
       catch (e) { onSaveError(e); }
     }
   }
+  /* ---------- Progressione automatica ---------- */
+  function repsLabel(list) { return list.every((r) => r === list[0]) ? list.length + ' × ' + list[0] : list.join(' · '); }
+  function progressionBanner(day, ex, current, sug) {
+    const title = sug.mode === 'weight' ? 'Aumenta il peso' : 'Aumenta le ripetizioni';
+    const repsChanged = sug.setReps.some((r, i) => r !== sug.fromReps[i]);
+    const detail = sug.mode === 'weight'
+      ? fmtKg(sug.fromKg) + ' → ' + fmtKg(sug.kg) + ' kg' + (repsChanged ? ' · ' + repsLabel(sug.setReps) : '')
+      : repsLabel(sug.fromReps) + ' → ' + repsLabel(sug.setReps);
+    return ctx.h('div', { class: 'workout-progress-card', 'data-workout-progression': sug.mode },
+      ctx.h('span', { class: 'workout-progress-icon', html: ctx.I('spark', 18) }),
+      ctx.h('div', { class: 'workout-progress-copy' },
+        ctx.h('strong', null, title),
+        ctx.h('b', { class: 'workout-progress-detail' }, detail),
+        ctx.h('small', null, 'Hai completato tutte le serie nelle ultime ' + PROG_SESSIONS + ' sessioni.')),
+      ctx.h('button', {
+        class: 'workout-progress-apply', type: 'button', 'data-workout-progress-apply': '1', 'aria-label': 'Applica: ' + title,
+        onclick: (e) => applyProgression(ex, current, sug, e.currentTarget)
+      }, ctx.h('span', { html: ctx.I('check', 18) })));
+  }
+  async function applyProgression(ex, current, sug, button) {
+    const before = copy(ex), beforeSets = current ? copy(current.sets) : null;
+    applyTarget(ex, sug.kg, sug.setReps);
+    if (current) retargetSession(current, ex);
+    try { await save(); } catch (e) { onSaveError(e); return; }
+    button.disabled = true;
+    button.classList.add('is-applied');
+    await new Promise((r) => setTimeout(r, 420));
+    render();
+    ctx.toast('Obiettivo aggiornato: ' + fmtKg(ex.kg) + ' kg · ' + repsSummary(ex), 5200, {
+      label: 'Annulla',
+      fn: async () => {
+        Object.keys(ex).forEach((k) => { delete ex[k]; });
+        Object.assign(ex, before);
+        if (current && beforeSets) current.sets = beforeSets;
+        try { await save(); render(); ctx.toast('Obiettivo ripristinato'); } catch (e) { onSaveError(e); }
+      }
+    });
+  }
+
+  /* ---------- Sostituzione degli esercizi ---------- */
+  function cap(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+  function openSubstitute(dayId, exerciseId) {
+    const day = dayById(dayId);
+    const ex = day && day.exercises.find((e) => e.id === exerciseId);
+    if (!ex) return;
+    const entry = day.activeSession ? day.activeSession.exercises.find((e) => e.exerciseId === ex.id) : null;
+    if (entry && entry.sets.some((x) => x.done)) { ctx.toast('Hai già fatto serie di questo esercizio: puoi sostituirlo dopo la sessione.', 4200); return; }
+    const found = findCatalog(ex.name);
+    let group = cleanGroup(ex.group) || (found && found.group) || '';
+    let mode = entry ? 'today' : 'plan';
+    const box = ctx.h('div', { class: 'workout-substitute', 'data-workout-substitute': '1' });
+    const sheet = ctx.openSheet('Sostituisci ' + ex.name, box);
+    function draw() {
+      const result = substituteSuggestions(ex, day.exercises, group);
+      const parts = [];
+      if (entry) {
+        parts.push(ctx.h('div', { class: 'workout-segment', role: 'group', 'aria-label': 'Dove applicare la sostituzione' },
+          ...[['today', 'Solo oggi'], ['plan', 'Nella scheda']].map(([value, label]) => ctx.h('button', {
+            class: 'workout-segment-btn' + (mode === value ? ' active' : ''), type: 'button', 'data-sub-mode': value, 'aria-pressed': String(mode === value),
+            onclick: () => { mode = value; draw(); }
+          }, label))));
+      }
+      parts.push(ctx.h('div', { class: 'workout-chips', role: 'group', 'aria-label': 'Gruppo muscolare' },
+        ...GROUPS.filter((g) => g !== GROUP_OTHER).map((g) => ctx.h('button', {
+          class: 'workout-chip' + (g === group ? ' active' : ''), type: 'button', 'data-sub-group': g, 'aria-pressed': String(g === group),
+          onclick: () => { group = g; draw(); }
+        }, g))));
+      if (!result.items.length) {
+        parts.push(ctx.h('p', { class: 'hint', 'data-sub-empty': '1' }, 'Scegli un gruppo muscolare per vedere le alternative.'));
+      } else {
+        const from = equipmentOf(ex);
+        result.items.forEach((pick) => {
+          const start = substituteKg(ex.kg, from, pick.equipment);
+          parts.push(ctx.h('div', { class: 'workout-sub-row', 'data-sub-name': pick.name },
+            ctx.h('div', { class: 'workout-sub-copy' },
+              ctx.h('strong', null, pick.name),
+              ctx.h('small', null, cap(pick.equipment) + (pick.samePattern ? ' · stesso movimento' : '') + (start > 0 ? ' · parti da ' + fmtKg(start) + ' kg' + (pick.equipment === 'manubri' ? ' a manubrio' : '') : ''))),
+            ctx.h('button', { class: 'btn pri workout-sub-use', type: 'button', 'data-sub-use': pick.name, onclick: () => choose(pick) }, 'Usa')));
+        });
+        parts.push(ctx.h('p', { class: 'hint' }, 'Serie e ripetizioni restano uguali. Il carico di partenza è una stima prudente: correggilo alla prima serie.'));
+      }
+      box.replaceChildren(...parts);
+    }
+    async function choose(pick) {
+      const sub = makeSubstitute(ex, pick, ctx.uid());
+      const fresh = () => Array.from({ length: whole(sub.setCount, 3, 1, MAX_SETS) }, (_, i) => makeSet(sub, i));
+      const today = !!entry && mode === 'today';
+      if (today) {
+        entry.name = sub.name; entry.group = sub.group; entry.substitute = true; entry.sets = fresh();
+      } else {
+        day.exercises[day.exercises.findIndex((e) => e.id === ex.id)] = sub;
+        if (entry) day.activeSession.exercises[day.activeSession.exercises.indexOf(entry)] = { exerciseId: sub.id, name: sub.name, group: sub.group, sets: fresh() };
+      }
+      try { await save(); await sheet.close(); render(); ctx.toast(today ? 'Oggi farai ' + sub.name : sub.name + ' al posto di ' + ex.name, 3200); }
+      catch (e) { onSaveError(e); }
+    }
+    draw();
+  }
+
+  /* ---------- Volume settimanale nel tempo ---------- */
+  function fmtCompact(v) { return v >= 1000 ? (Math.round(v / 100) / 10).toLocaleString('it-IT') + 'k' : String(v); }
+  // Grafico SVG a barre. points = [{ label, value, current }].
+  function barChartSvg(points, title) {
+    const W = 320, H = 150, L = 8, R = 8, T = 18, B = 24;
+    const max = Math.max(1, ...points.map((p) => p.value));
+    const slot = (W - L - R) / points.length, bw = Math.min(26, slot * 0.62);
+    const base = H - B;
+    const bars = points.map((p, i) => {
+      const h = p.value > 0 ? Math.max(3, (base - T) * (p.value / max)) : 0;
+      const x = L + i * slot + (slot - bw) / 2, y = base - h;
+      return (h ? '<rect class="wk-bar' + (p.current ? ' current' : '') + '" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="5"/>' : '') +
+        (p.value > 0 ? '<text class="wk-value" x="' + (x + bw / 2).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle">' + fmtCompact(p.value) + '</text>' : '') +
+        '<text class="wk-x" x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 7) + '" text-anchor="middle">' + escAttr(p.label) + '</text>';
+    }).join('');
+    return '<svg class="wk-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + escAttr(title) + '">' +
+      '<line class="wk-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + base + '" y2="' + base + '"/>' + bars + '</svg>';
+  }
+  function renderVolumeChart(body) {
+    if (!state.program.sessions.length) return;
+    const series = weeklyVolumeSeries(state.program.sessions, Date.now(), 8);
+    const last = series[series.length - 1], before = series[series.length - 2];
+    const points = series.map((w, i) => {
+      const d = new Date(w.start);
+      return { label: d.getDate() + '/' + (d.getMonth() + 1), value: w.volume, current: i === series.length - 1 };
+    });
+    let summary = 'Questa settimana: ' + fmtKg(last.volume) + ' kg.';
+    if (before.volume > 0) {
+      const pct = Math.round(((last.volume - before.volume) / before.volume) * 100);
+      summary += ' ' + (pct === 0 ? 'Come la settimana scorsa.' : (pct > 0 ? '+' : '') + pct + '% rispetto alla settimana scorsa.');
+    }
+    body.append(ctx.h('section', { class: 'workout-card workout-volume-chart', 'data-workout-volume-chart': '1' },
+      ctx.h('div', { class: 'workout-section-heading' },
+        ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, 'ULTIME 8 SETTIMANE'), ctx.h('h3', null, 'Volume settimanale'))),
+      ctx.h('div', { class: 'wk-chart-wrap', html: barChartSvg(points, 'Volume in kg per settimana') }),
+      ctx.h('p', { class: 'hint', 'data-volume-summary': '1' }, summary)));
+  }
+
+  /* ---------- Riepilogo mensile ---------- */
+  function renderMonthCard(body) {
+    if (!state.program.sessions.length) return;
+    const now = new Date();
+    const m = monthlySummary(state.program, now.getFullYear(), now.getMonth());
+    body.append(ctx.h('button', { class: 'workout-card workout-month-card', type: 'button', 'data-workout-month': '1', onclick: openMonthly },
+      ctx.h('span', { class: 'workout-month-icon', html: ctx.I('calendar', 20) }),
+      ctx.h('span', { class: 'workout-month-copy' },
+        ctx.h('strong', null, 'Riepilogo di ' + now.toLocaleDateString('it-IT', { month: 'long' })),
+        ctx.h('small', null, m.sessions + (m.sessions === 1 ? ' sessione' : ' sessioni') + ' · ' + fmtKg(m.volume) + ' kg di volume')),
+      ctx.h('span', { class: 'workout-chevron', 'aria-hidden': 'true' }, '›')));
+  }
+  function openMonthly() {
+    const now = new Date();
+    let year = now.getFullYear(), month = now.getMonth();
+    const box = ctx.h('div', { class: 'workout-monthly', 'data-workout-monthly-sheet': '1' });
+    const isCurrent = () => year === now.getFullYear() && month === now.getMonth();
+    function shift(delta) {
+      month += delta;
+      if (month < 0) { month = 11; year--; } else if (month > 11) { month = 0; year++; }
+      draw();
+    }
+    const tile = (label, value, note) => ctx.h('div', { class: 'workout-month-tile' }, ctx.h('small', null, label), ctx.h('strong', null, value), note ? ctx.h('span', null, note) : null);
+    const signedInt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
+    function draw() {
+      const m = monthlySummary(state.program, year, month);
+      const title = new Date(year, month, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+      const parts = [ctx.h('div', { class: 'workout-cal-head' },
+        ctx.h('button', { class: 'ibtn workout-cal-nav', type: 'button', 'data-month-prev': '1', 'aria-label': 'Mese precedente', onclick: () => shift(-1) }, '‹'),
+        ctx.h('strong', { 'data-month-title': '1' }, cap(title)),
+        ctx.h('button', { class: 'ibtn workout-cal-nav', type: 'button', 'data-month-next': '1', 'aria-label': 'Mese successivo', disabled: isCurrent(), onclick: () => shift(1) }, '›'))];
+      if (!m.sessions) {
+        parts.push(ctx.h('p', { class: 'hint', 'data-month-empty': '1' }, 'Nessuna sessione in questo mese.'));
+      } else {
+        parts.push(ctx.h('div', { class: 'workout-month-grid' },
+          tile('Sessioni', String(m.sessions), m.prevSessions ? (m.sessions === m.prevSessions ? 'come il mese prima' : signedInt(m.sessions - m.prevSessions) + ' sul mese prima') : ''),
+          tile('Volume', fmtKg(m.volume) + ' kg', m.volumePct == null ? '' : m.volumePct === 0 ? 'come il mese prima' : (m.volumePct > 0 ? '+' : '') + m.volumePct + '% sul mese prima'),
+          tile('Serie', String(m.sets), ''),
+          tile('Giorni attivi', String(m.activeDays), '')));
+        if (m.topDays.length) {
+          parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Giorni più frequenti'));
+          m.topDays.forEach((d) => parts.push(ctx.h('div', { class: 'workout-compare-row', 'data-month-day': d.name }, ctx.h('span', null, d.name), ctx.h('b', null, d.count + (d.count === 1 ? ' volta' : ' volte')))));
+        }
+        if (m.groups.length) {
+          parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Gruppi più allenati'));
+          const top = m.groups[0].sets;
+          m.groups.forEach((g) => parts.push(ctx.h('div', { class: 'workout-volume-row', 'data-month-group': g.group },
+            ctx.h('span', { class: 'workout-volume-label' }, g.group),
+            ctx.h('span', { class: 'workout-volume-track' }, ctx.h('span', { class: 'workout-volume-bar', style: { width: Math.round((g.sets / top) * 100) + '%' } })),
+            ctx.h('b', null, g.sets + ' serie'))));
+        }
+        parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Miglior progresso'));
+        parts.push(m.best
+          ? ctx.h('div', { class: 'workout-month-best', 'data-month-best': '1' },
+              ctx.h('strong', null, m.best.name),
+              ctx.h('span', null, fmtKg(m.best.from) + ' → ' + fmtKg(m.best.to) + (m.best.unit === 'kg' ? ' kg di massimale stimato' : ' ripetizioni') + ' (+' + m.best.pct + '%)'))
+          : ctx.h('p', { class: 'hint', 'data-month-best-empty': '1' }, 'Nessun miglioramento ancora: serve almeno un esercizio fatto più volte.'));
+      }
+      box.replaceChildren(...parts);
+    }
+    ctx.openSheet('Riepilogo mensile', box);
+    draw();
+  }
+
   /* ---------- Riscaldamento, confronto, volume settimanale, backup ---------- */
   async function addWarmup(current, work) {
     const plan = warmupPlan(work.kg, work.reps);
@@ -988,11 +1194,15 @@
     });
     input.click();
   }
+  function countText(program) {
+    const d = program.days.length, n = program.sessions.length;
+    return d + (d === 1 ? ' giornata' : ' giornate') + ' e ' + n + (n === 1 ? ' sessione' : ' sessioni');
+  }
   function confirmImport(incoming) {
     const cur = state.program;
     const body = ctx.h('div', { class: 'workout-form' },
-      ctx.h('p', null, 'Il backup contiene ' + incoming.days.length + ' giornate e ' + incoming.sessions.length + ' sessioni.'),
-      ctx.h('p', { class: 'hint' }, 'Ora hai ' + cur.days.length + ' giornate e ' + cur.sessions.length + ' sessioni. Ripristinando, i dati attuali vengono sostituiti: esporta prima un backup se vuoi conservarli.'),
+      ctx.h('p', { 'data-import-summary': '1' }, 'Il backup contiene ' + countText(incoming) + '.'),
+      ctx.h('p', { class: 'hint' }, 'Ora hai ' + countText(cur) + '. Ripristinando, i dati attuali vengono sostituiti: esporta prima un backup se vuoi conservarli.'),
       ctx.h('div', { class: 'btns' },
         ctx.h('button', { class: 'btn', onclick: () => sheet.close() }, 'Annulla'),
         ctx.h('button', { class: 'btn pri', 'data-workout-import-confirm': '1', onclick: applyImport }, 'Sostituisci e ripristina')
@@ -1339,11 +1549,10 @@
     const kgs = (ex && ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup').map((x) => Number(x.kg)).filter(Number.isFinite);
     return kgs.length ? Math.max.apply(null, kgs) : null;
   }
-  // Serie di lavoro completate per gruppo muscolare negli ultimi `days` giorni (il riscaldamento non conta).
-  function weeklyGroupVolume(sessions, now, days) {
-    const since = (now == null ? Date.now() : now) - (days == null ? 7 : days) * 864e5;
+  // Serie di lavoro completate per gruppo muscolare tra `from` (incluso) e `to` (escluso); il riscaldamento non conta.
+  function groupVolumeBetween(sessions, from, to) {
     const totals = new Map();
-    (sessions || []).filter((s) => Number(s.completedAt) >= since).forEach((s) => {
+    (sessions || []).filter((s) => Number(s.completedAt) >= from && Number(s.completedAt) < to).forEach((s) => {
       (s.exercises || []).forEach((ex) => {
         const group = groupOf(ex);
         (ex.sets || []).forEach((set) => {
@@ -1356,6 +1565,11 @@
       });
     });
     return Array.from(totals.values()).sort((a, b) => b.sets - a.sets || GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group));
+  }
+  // Ultimi `days` giorni (7 se non indicato).
+  function weeklyGroupVolume(sessions, now, days) {
+    const since = (now == null ? Date.now() : now) - (days == null ? 7 : days) * 864e5;
+    return groupVolumeBetween(sessions, since, Infinity);
   }
   // Formula di Epley: 1RM = kg × (1 + rip/30). Oltre 12 ripetizioni la stima non è affidabile.
   function estimateOneRm(kg, reps) {
@@ -1398,7 +1612,8 @@
     const delta = Math.round((b.volume - a.volume) * 10) / 10;
     const exercises = [];
     (curr.exercises || []).forEach((ex) => {
-      const before = (prev.exercises || []).find((e) => e.exerciseId === ex.exerciseId);
+      if (ex.substitute) return;
+      const before = (prev.exercises || []).find((e) => e.exerciseId === ex.exerciseId && !e.substitute);
       const now = topKg(ex), was = before ? topKg(before) : null;
       if (now == null || was == null) return;
       exercises.push({ name: ex.name, kg: now, prevKg: was, delta: Math.round((now - was) * 10) / 10 });
@@ -1420,7 +1635,296 @@
     return program;
   }
 
-  const _logic = { cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet,
+
+  /* ---------- Progressione automatica ---------- */
+  const PROG_SESSIONS = 2, PROG_REP_CAP = 12, PROG_LOW_REPS = 6, PROG_BODY_CAP = 30, PROG_RESET_MIN = 8;
+  function kgStep(kg) { return kg >= 20 ? 2.5 : 1; }
+  // Posizioni delle serie «normali» (riscaldamento, cedimento e simili non contano per la progressione).
+  function normalIndexes(ex) {
+    const out = [];
+    for (let i = 0; i < whole(ex && ex.setCount, 3, 1, MAX_SETS); i++) if (typeFor(ex, i) === 'normal') out.push(i);
+    return out;
+  }
+  // La sessione raggiunge l'obiettivo se ogni serie normale è fatta, con almeno le ripetizioni e il carico previsti, e senza RPE oltre 9.
+  function sessionMeetsTarget(entry, ex) {
+    const idx = normalIndexes(ex);
+    if (!entry || !idx.length) return false;
+    const sets = (entry.sets || []).filter((x) => x && cleanType(x.type) === 'normal');
+    if (sets.length < idx.length) return false;
+    return idx.every((planned, j) => {
+      const x = sets[j];
+      return x.done === true && Number(x.reps) >= repsFor(ex, planned) && Number(x.kg) >= (Number(ex.kg) || 0) && !(Number(x.rpe) > 9);
+    });
+  }
+  // Prossimo obiettivo. Fino a 6 rip. si sale di carico; da 7 a 11 si aggiunge una ripetizione per serie;
+  // con tutte le serie a 12 o più si sale di carico e le ripetizioni si riducono. A corpo libero si aggiungono ripetizioni.
+  function nextTarget(ex) {
+    const idx = normalIndexes(ex);
+    if (!idx.length) return null;
+    const reps = repsList(ex), kg = Number(ex.kg) || 0;
+    const normal = idx.map((i) => reps[i]);
+    const next = reps.slice();
+    let mode, nextKg = kg;
+    const heavier = () => Math.min(MAX_KG, Math.round((kg + kgStep(kg)) * 10) / 10);
+    if (kg <= 0) {
+      if (Math.min(...normal) >= PROG_BODY_CAP) return null;
+      mode = 'reps';
+      idx.forEach((i) => { if (reps[i] < PROG_BODY_CAP) next[i] = reps[i] + 1; });
+    } else if (Math.min(...normal) >= PROG_REP_CAP) {
+      mode = 'weight'; nextKg = heavier();
+      idx.forEach((i) => { next[i] = Math.max(PROG_RESET_MIN, Math.round(reps[i] * 0.7)); });
+    } else if (Math.max(...normal) <= PROG_LOW_REPS) {
+      mode = 'weight'; nextKg = heavier();
+    } else {
+      mode = 'reps';
+      idx.forEach((i) => { if (reps[i] < PROG_REP_CAP) next[i] = reps[i] + 1; });
+    }
+    if (mode === 'weight' && nextKg <= kg) return null;
+    return { mode, kg: nextKg, setReps: next, fromKg: kg, fromReps: reps };
+  }
+  // Propone la progressione solo se le ultime PROG_SESSIONS sessioni dell'esercizio hanno raggiunto l'obiettivo attuale.
+  function progressionSuggestion(program, ex) {
+    if (!ex) return null;
+    const entries = [];
+    ((program && program.sessions) || []).slice().sort((a, b) => sessionTime(b) - sessionTime(a)).forEach((sess) => {
+      if (entries.length >= PROG_SESSIONS) return;
+      const e = (sess.exercises || []).find((x) => x.exerciseId === ex.id && !x.substitute);
+      if (e) entries.push(e);
+    });
+    if (entries.length < PROG_SESSIONS || !entries.every((e) => sessionMeetsTarget(e, ex))) return null;
+    return nextTarget(ex);
+  }
+  function applyTarget(ex, kg, list) {
+    ex.kg = weight(kg, ex.kg);
+    ex.reps = list[0];
+    if (list.every((r) => r === list[0])) delete ex.setReps; else ex.setReps = list.slice();
+  }
+  // Allinea alle nuove ripetizioni e al nuovo carico le serie normali non ancora fatte della sessione in corso.
+  function retargetSession(entry, ex) {
+    const idx = normalIndexes(ex);
+    let j = 0;
+    (entry && entry.sets || []).forEach((x) => {
+      if (cleanType(x.type) !== 'normal') return;
+      const planned = idx[j++];
+      if (x.done || planned == null) return;
+      x.kg = ex.kg;
+      x.reps = repsFor(ex, planned);
+    });
+  }
+
+  /* ---------- Sostituzione degli esercizi ---------- */
+  function normName(v) {
+    return String(v == null ? '' : v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+  // [nome, gruppo, movimento, attrezzo, sinonimi]. Il movimento serve a proporre prima le alternative più simili.
+  const CATALOG = [
+    ['Panca piana', 'Petto', 'spinta piana', 'bilanciere', ['panca piana bilanciere', 'bench press', 'distensioni su panca']],
+    ['Panca piana manubri', 'Petto', 'spinta piana', 'manubri', ['panca piana con manubri', 'distensioni con manubri']],
+    ['Chest press', 'Petto', 'spinta piana', 'macchina', ['pressa petto', 'chest press macchina']],
+    ['Piegamenti', 'Petto', 'spinta piana', 'corpo libero', ['piegamenti sulle braccia', 'push up']],
+    ['Panca inclinata', 'Petto', 'spinta inclinata', 'bilanciere', ['panca inclinata bilanciere']],
+    ['Panca inclinata manubri', 'Petto', 'spinta inclinata', 'manubri', ['panca inclinata con manubri']],
+    ['Chest press inclinata', 'Petto', 'spinta inclinata', 'macchina', []],
+    ['Croci manubri', 'Petto', 'aperture', 'manubri', ['croci con manubri', 'croci su panca piana']],
+    ['Croci ai cavi', 'Petto', 'aperture', 'cavi', ['croci cavi', 'cable crossover']],
+    ['Pec deck', 'Petto', 'aperture', 'macchina', ['butterfly', 'pectoral machine']],
+    ['Dip alle parallele', 'Petto', 'spinta declinata', 'corpo libero', ['parallele', 'dip', 'dips']],
+    ['Panca declinata', 'Petto', 'spinta declinata', 'bilanciere', []],
+    ['Lat machine', 'Dorso', 'trazione verticale', 'cavi', ['lat pulldown', 'lat machine presa larga']],
+    ['Lat machine presa stretta', 'Dorso', 'trazione verticale', 'cavi', ['lat machine presa neutra']],
+    ['Trazioni alla sbarra', 'Dorso', 'trazione verticale', 'corpo libero', ['trazioni', 'pull up', 'chin up']],
+    ['Trazioni assistite', 'Dorso', 'trazione verticale', 'macchina', ['trazioni alla macchina']],
+    ['Rematore con bilanciere', 'Dorso', 'rematore', 'bilanciere', ['rematore bilanciere']],
+    ['Rematore con manubrio', 'Dorso', 'rematore', 'manubri', ['rematore manubrio', 'rematore manubri', 'rematore a un braccio']],
+    ['Rematore al cavo', 'Dorso', 'rematore', 'cavi', ['pulley', 'low row', 'rematore ai cavi', 'rematore seduto']],
+    ['Rematore alla macchina', 'Dorso', 'rematore', 'macchina', ['row machine', 'rematore macchina']],
+    ['T-bar row', 'Dorso', 'rematore', 'bilanciere', ['rematore t bar']],
+    ['Pullover ai cavi', 'Dorso', 'isolamento dorsali', 'cavi', ['pulldown braccia tese']],
+    ['Hyperextension', 'Dorso', 'lombari', 'corpo libero', ['iperestensioni', 'estensioni lombari']],
+    ['Stacco da terra', 'Dorso', 'stacco', 'bilanciere', ['stacco', 'deadlift']],
+    ['Military press', 'Spalle', 'spinta verticale', 'bilanciere', ['lento avanti', 'overhead press']],
+    ['Shoulder press manubri', 'Spalle', 'spinta verticale', 'manubri', ['lento avanti manubri', 'arnold press']],
+    ['Shoulder press macchina', 'Spalle', 'spinta verticale', 'macchina', ['lento avanti macchina']],
+    ['Alzate laterali manubri', 'Spalle', 'laterali', 'manubri', ['alzate laterali', 'alzate laterali con manubri']],
+    ['Alzate laterali ai cavi', 'Spalle', 'laterali', 'cavi', ['alzate laterali cavo']],
+    ['Alzate laterali macchina', 'Spalle', 'laterali', 'macchina', []],
+    ['Alzate posteriori manubri', 'Spalle', 'posteriori', 'manubri', ['alzate posteriori', 'alzate a 90']],
+    ['Reverse pec deck', 'Spalle', 'posteriori', 'macchina', ['pec deck inverso']],
+    ['Face pull', 'Spalle', 'posteriori', 'cavi', []],
+    ['Alzate frontali', 'Spalle', 'frontali', 'manubri', []],
+    ['Scrollate', 'Spalle', 'trapezi', 'manubri', ['shrug']],
+    ['Curl con bilanciere', 'Bicipiti', 'curl', 'bilanciere', ['curl bilanciere', 'curl ez', 'curl con ez']],
+    ['Curl con manubri', 'Bicipiti', 'curl', 'manubri', ['curl manubri']],
+    ['Curl a martello', 'Bicipiti', 'curl neutro', 'manubri', ['hammer curl']],
+    ['Curl su panca inclinata', 'Bicipiti', 'curl allungato', 'manubri', []],
+    ['Curl ai cavi', 'Bicipiti', 'curl', 'cavi', ['curl cavo']],
+    ['Curl alla macchina', 'Bicipiti', 'curl', 'macchina', ['preacher curl', 'panca scott']],
+    ['Curl concentrato', 'Bicipiti', 'isolamento', 'manubri', []],
+    ['French press', 'Tricipiti', 'estensione sopra la testa', 'bilanciere', ['skull crusher', 'french press ez']],
+    ['Pushdown ai cavi', 'Tricipiti', 'pushdown', 'cavi', ['pushdown', 'push down', 'tricipiti ai cavi']],
+    ['Pushdown con corda', 'Tricipiti', 'pushdown', 'cavi', []],
+    ['Estensioni sopra la testa', 'Tricipiti', 'estensione sopra la testa', 'manubri', ['estensione tricipiti manubrio']],
+    ['Estensioni ai cavi sopra la testa', 'Tricipiti', 'estensione sopra la testa', 'cavi', []],
+    ['Dip alla panca', 'Tricipiti', 'spinta', 'corpo libero', ['dip su panca']],
+    ['Panca presa stretta', 'Tricipiti', 'spinta', 'bilanciere', []],
+    ['Kickback', 'Tricipiti', 'kickback', 'manubri', []],
+    ['Tricipiti alla macchina', 'Tricipiti', 'spinta', 'macchina', ['dip machine']],
+    ['Squat', 'Gambe', 'squat', 'bilanciere', ['back squat', 'squat con bilanciere']],
+    ['Front squat', 'Gambe', 'squat', 'bilanciere', []],
+    ['Goblet squat', 'Gambe', 'squat', 'manubri', []],
+    ['Hack squat', 'Gambe', 'squat', 'macchina', []],
+    ['Leg press', 'Gambe', 'squat', 'macchina', ['pressa', 'pressa 45']],
+    ['Affondi', 'Gambe', 'affondi', 'manubri', ['lunges', 'affondi con manubri']],
+    ['Affondi bulgari', 'Gambe', 'affondi', 'manubri', ['bulgarian split squat', 'split squat bulgaro']],
+    ['Step-up', 'Gambe', 'affondi', 'manubri', ['step up']],
+    ['Leg extension', 'Gambe', 'quadricipiti isolamento', 'macchina', []],
+    ['Leg curl seduto', 'Gambe', 'femorali', 'macchina', ['leg curl']],
+    ['Leg curl sdraiato', 'Gambe', 'femorali', 'macchina', []],
+    ['Stacchi rumeni', 'Gambe', 'femorali', 'bilanciere', ['stacco rumeno', 'romanian deadlift', 'rdl']],
+    ['Stacchi rumeni manubri', 'Gambe', 'femorali', 'manubri', []],
+    ['Calf in piedi', 'Gambe', 'polpacci', 'macchina', ['calf raise', 'polpacci']],
+    ['Calf seduto', 'Gambe', 'polpacci', 'macchina', []],
+    ['Adductor machine', 'Gambe', 'adduttori', 'macchina', ['adduttori']],
+    ['Hip thrust', 'Glutei', 'ponte glutei', 'bilanciere', []],
+    ['Ponte glutei', 'Glutei', 'ponte glutei', 'corpo libero', ['glute bridge']],
+    ['Hip thrust alla macchina', 'Glutei', 'ponte glutei', 'macchina', []],
+    ['Kickback ai cavi', 'Glutei', 'estensione anca', 'cavi', ['glute kickback']],
+    ['Abductor machine', 'Glutei', 'abduzione', 'macchina', ['abduttori']],
+    ['Abduzioni ai cavi', 'Glutei', 'abduzione', 'cavi', []],
+    ['Affondi camminati', 'Glutei', 'affondi', 'manubri', []],
+    ['Squat sumo', 'Glutei', 'squat', 'manubri', []],
+    ['Crunch', 'Addome', 'crunch', 'corpo libero', []],
+    ['Crunch ai cavi', 'Addome', 'crunch', 'cavi', ['cable crunch']],
+    ['Crunch alla macchina', 'Addome', 'crunch', 'macchina', []],
+    ['Plank', 'Addome', 'statico', 'corpo libero', []],
+    ['Sollevamento gambe', 'Addome', 'gambe', 'corpo libero', ['leg raise', 'sollevamento gambe alla sbarra']],
+    ['Russian twist', 'Addome', 'rotazioni', 'corpo libero', []],
+    ['Ab wheel', 'Addome', 'rollout', 'corpo libero', ['ruota addominali', 'rollout']],
+    ['Woodchop ai cavi', 'Addome', 'rotazioni', 'cavi', ['taglialegna'] ]
+  ].map((r) => ({ name: r[0], group: r[1], pattern: r[2], equipment: r[3], keys: [normName(r[0])].concat(r[4].map(normName)) }));
+  // Riconosce l'esercizio dal nome: prima la corrispondenza esatta, poi la parola chiave più lunga contenuta nel nome.
+  function findCatalog(name) {
+    const n = normName(name);
+    if (!n) return null;
+    const exact = CATALOG.find((c) => c.keys.includes(n));
+    if (exact) return exact;
+    let best = null, bestLen = 0;
+    CATALOG.forEach((c) => c.keys.forEach((k) => {
+      if (k.length >= 5 && k.length > bestLen && (' ' + n + ' ').includes(' ' + k + ' ')) { best = c; bestLen = k.length; }
+    }));
+    return best;
+  }
+  function equipmentOf(ex) { const f = findCatalog(ex && ex.name); return f ? f.equipment : null; }
+  // Alternative dello stesso gruppo: prima lo stesso movimento con un altro attrezzo, poi le altre. Esclude gli esercizi già nella giornata.
+  function substituteSuggestions(ex, dayExercises, group) {
+    const found = findCatalog(ex && ex.name);
+    const g = cleanGroup(group) || cleanGroup(ex && ex.group) || (found && found.group) || null;
+    if (!g || g === GROUP_OTHER) return { group: g, items: [] };
+    const taken = new Set((dayExercises || []).map((e) => normName(e.name)));
+    const items = CATALOG.map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.group === g && !(found && c.name === found.name) && !taken.has(normName(c.name)))
+      .map(({ c, i }) => ({ c, i, score: found && found.group === g ? (c.pattern === found.pattern ? 3 : 0) + (c.equipment !== found.equipment ? 1 : 0) : 0 }))
+      .sort((a, b) => b.score - a.score || a.i - b.i)
+      .slice(0, 6)
+      .map(({ c }) => ({ name: c.name, group: c.group, equipment: c.equipment, samePattern: !!(found && found.group === g && c.pattern === found.pattern) }));
+    return { group: g, items };
+  }
+  // Carico di partenza prudente per il nuovo attrezzo: è una stima da correggere alla prima serie.
+  function substituteKg(kg, fromEquip, toEquip) {
+    const k = Number(kg) || 0;
+    if (k <= 0 || toEquip === 'corpo libero') return 0;
+    let f = 0.7;
+    if (fromEquip === 'bilanciere' && toEquip === 'manubri') f = 0.4;
+    else if (fromEquip === 'manubri' && toEquip === 'bilanciere') f = 2;
+    else if (fromEquip && fromEquip === toEquip && toEquip !== 'macchina') f = 1;
+    const v = k * f;
+    return v >= 20 ? Math.round(v / 2.5) * 2.5 : Math.max(1, Math.round(v * 2) / 2);
+  }
+  // Nuovo esercizio con le stesse serie e ripetizioni; la nota fissa riguardava quello vecchio e non si porta dietro.
+  function makeSubstitute(ex, pick, id) {
+    const out = { id, name: pick.name, group: pick.group, setCount: ex.setCount, reps: ex.reps, kg: substituteKg(ex.kg, equipmentOf(ex), pick.equipment) };
+    if (ex.setReps) out.setReps = ex.setReps.slice();
+    if (ex.setTypes) out.setTypes = ex.setTypes.slice();
+    return normalizeExercise(out);
+  }
+
+  /* ---------- Volume settimanale nel tempo e riepilogo mensile ---------- */
+  function addWeeks(ts, n) { const d = new Date(ts); d.setDate(d.getDate() + 7 * n); return d.getTime(); }
+  // Volume (kg sollevati) di ognuna delle ultime `weeks` settimane, da lunedì a domenica; l'ultima è quella in corso.
+  function weeklyVolumeSeries(sessions, now, weeks) {
+    const count = weeks || 8;
+    const first = addWeeks(startOfWeek(now == null ? Date.now() : now), -(count - 1));
+    const end = addWeeks(first, count);
+    const out = Array.from({ length: count }, (_, i) => ({ start: addWeeks(first, i), volume: 0, sessions: 0 }));
+    (sessions || []).forEach((sess) => {
+      const when = sessionTime(sess);
+      if (when < first || when >= end) return;
+      let k = count - 1;
+      while (k > 0 && out[k].start > when) k--;
+      out[k].volume += sessionStats(sess).volume;
+      out[k].sessions += 1;
+    });
+    out.forEach((w) => { w.volume = Math.round(w.volume); });
+    return out;
+  }
+  // Valore di una serie per misurare il progresso: massimale stimato, o ripetizioni se a corpo libero.
+  function progressMetric(x) {
+    const kg = Number(x.kg) || 0, reps = Number(x.reps) || 0;
+    if (kg > 0) return { value: estimateOneRm(kg, reps) || kg, unit: 'kg' };
+    return { value: reps, unit: 'rip' };
+  }
+  // L'esercizio che nel mese è migliorato di più rispetto al suo miglior valore precedente (o alla prima sessione del mese).
+  function bestProgress(sessions, from, to) {
+    const byEx = new Map();
+    (sessions || []).forEach((sess) => (sess.exercises || []).forEach((ex) => {
+      if (ex.substitute) return;
+      const done = (ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup');
+      if (!done.length) return;
+      const top = done.map(progressMetric).reduce((a, b) => (b.value > a.value ? b : a));
+      if (!(top.value > 0)) return;
+      const list = byEx.get(ex.exerciseId) || [];
+      list.push({ t: sessionTime(sess), value: top.value, unit: top.unit, name: ex.name });
+      byEx.set(ex.exerciseId, list);
+    }));
+    let best = null;
+    byEx.forEach((list) => {
+      list.sort((a, b) => a.t - b.t);
+      const inMonth = list.filter((p) => p.t >= from && p.t < to);
+      if (!inMonth.length) return;
+      const before = list.filter((p) => p.t < from);
+      const baseline = before.length ? Math.max(...before.map((p) => p.value)) : (inMonth.length >= 2 ? inMonth[0].value : null);
+      if (!(baseline > 0)) return;
+      const peak = Math.max(...inMonth.map((p) => p.value));
+      const gain = peak - baseline;
+      if (!(gain > 0)) return;
+      const cand = { name: inMonth[inMonth.length - 1].name, from: Math.round(baseline * 10) / 10, to: Math.round(peak * 10) / 10, pct: Math.round((gain / baseline) * 100), unit: inMonth[0].unit, gain };
+      if (!best || cand.pct > best.pct || (cand.pct === best.pct && cand.gain > best.gain)) best = cand;
+    });
+    if (best) delete best.gain;
+    return best;
+  }
+  function monthlySummary(program, year, month) {
+    const from = new Date(year, month, 1).getTime(), to = new Date(year, month + 1, 1).getTime();
+    const prevFrom = new Date(year, month - 1, 1).getTime();
+    const all = (program && program.sessions) || [];
+    const within = (a, b) => all.filter((x) => { const t = sessionTime(x); return t >= a && t < b; });
+    const list = within(from, to), prev = within(prevFrom, from);
+    const sum = (arr, key) => arr.reduce((n, x) => n + sessionStats(x)[key], 0);
+    const volume = Math.round(sum(list, 'volume')), prevVolume = Math.round(sum(prev, 'volume'));
+    const days = new Map();
+    list.forEach((x) => { const name = x.dayName || 'Allenamento'; days.set(name, (days.get(name) || 0) + 1); });
+    return {
+      from, sessions: list.length, sets: sum(list, 'completedSets'), volume,
+      activeDays: new Set(list.map((x) => dayKey(sessionTime(x)))).size,
+      prevSessions: prev.length, prevVolume,
+      volumePct: prevVolume > 0 ? Math.round(((volume - prevVolume) / prevVolume) * 100) : null,
+      topDays: Array.from(days, ([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 3),
+      groups: groupVolumeBetween(all, from, to).slice(0, 4),
+      best: bestProgress(all, from, to)
+    };
+  }
+
+  const _logic = { progressionSuggestion, nextTarget, applyTarget, retargetSession, sessionMeetsTarget, findCatalog, substituteSuggestions, substituteKg, makeSubstitute, weeklyVolumeSeries, monthlySummary, bestProgress, groupVolumeBetween, CATALOG, cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet,
     dayKey, startOfWeek, weekStreak, weekDots, monthGrid, bodyWeight, upsertBodyWeight, dateInputToTime, reminderPlan, parseTime, SET_TYPES, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.workouts;

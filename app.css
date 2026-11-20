@@ -922,3 +922,47 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 .workout-orm span, .workout-orm small { color: var(--muted); font-size: .72rem; }
 .workout-backup-actions { display: flex; gap: 8px; margin-top: 10px; }
 .workout-backup-actions .btn { flex: 1; }
+
+/* Allenamenti v4: progressione, sostituzione, grafico settimanale, riepilogo mensile */
+.workout-exercise-swap { width: 36px; height: 38px; margin-right: 0; color: var(--muted); }
+.workout-progress-card { display: flex; align-items: center; gap: 11px; margin: 2px 0 10px; padding: 11px 12px; border-radius: 16px; background: color-mix(in srgb, var(--accent) 11%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); animation: wk-pop .35s var(--ease-smooth, ease) both; }
+.workout-progress-icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.workout-progress-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.workout-progress-copy strong { font-size: .8rem; }
+.workout-progress-detail { font-size: .95rem; letter-spacing: -.01em; color: var(--accent); }
+.workout-progress-copy small { color: var(--muted); font-size: .68rem; }
+.workout-progress-apply { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: #fff; background: var(--accent); transition: transform .2s var(--ease-smooth, ease), box-shadow .2s; }
+.workout-progress-apply:active { transform: scale(.9); }
+.workout-progress-apply.is-applied { animation: wk-applied .42s ease both; }
+@keyframes wk-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes wk-applied { 0% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 55% { transform: scale(1.18); box-shadow: 0 0 0 14px transparent; } 100% { transform: scale(1); } }
+.workout-segment { display: flex; gap: 4px; padding: 4px; margin-bottom: 12px; border-radius: 14px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.workout-segment-btn { flex: 1; padding: 9px 8px; border-radius: 10px; font-size: .8rem; color: var(--muted); transition: background .2s, color .2s; }
+.workout-segment-btn.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+.workout-chips { display: flex; gap: 7px; margin-bottom: 12px; padding-bottom: 4px; overflow-x: auto; scrollbar-width: none; }
+.workout-chips::-webkit-scrollbar { display: none; }
+.workout-chip { flex: none; padding: 8px 13px; border-radius: 999px; font-size: .78rem; color: var(--muted); border: 1px solid var(--line); transition: background .2s, color .2s, border-color .2s; }
+.workout-chip.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+.workout-sub-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.workout-sub-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.workout-sub-copy strong { font-size: .88rem; }
+.workout-sub-copy small { color: var(--muted); font-size: .72rem; }
+.workout-sub-use { flex: none; min-width: 64px; }
+.wk-chart .wk-bar { fill: color-mix(in srgb, var(--accent) 45%, transparent); transition: opacity .2s; }
+.wk-chart .wk-bar.current { fill: var(--accent); }
+.workout-volume-chart { margin-top: 16px; padding: 14px; border-radius: 18px; background: var(--surface); }
+.workout-month-card { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 16px; padding: 14px; border-radius: 18px; background: var(--surface); text-align: left; transition: transform .2s var(--ease-smooth, ease); }
+.workout-month-card:active { transform: scale(.98); }
+.workout-month-icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.workout-month-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.workout-month-copy small { color: var(--muted); font-size: .74rem; }
+.workout-month-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 12px 0 4px; }
+.workout-month-tile { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-radius: 16px; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.workout-month-tile small { color: var(--muted); font-size: .7rem; }
+.workout-month-tile strong { font-size: 1.2rem; letter-spacing: -.02em; }
+.workout-month-tile span { color: var(--muted); font-size: .66rem; }
+.workout-month-h { margin: 16px 0 6px; font-size: .78rem; color: var(--muted); letter-spacing: .02em; }
+.workout-month-best { display: flex; flex-direction: column; gap: 2px; padding: 12px 13px; border-radius: 15px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.workout-month-best span { color: var(--muted); font-size: .78rem; }
+.workout-cal-nav:disabled { opacity: .3; }
+@media (prefers-reduced-motion: reduce) { .workout-progress-card, .workout-progress-apply.is-applied { animation: none; } }

@@ -294,4 +294,123 @@ t('il backup esportato si legge di nuovo e rifiuta i file non validi', () => {
   assert.throws(() => L.parseBackup(JSON.stringify({ app: 'mie-note-allenamenti', version: 1, program: {} })), /vuoto/);
 });
 
+/* ---------- progressione, sostituzioni, volume settimanale, riepilogo mensile ---------- */
+const ex8 = (extra) => Object.assign({ id: 'x', name: 'Panca', setCount: 3, reps: 8, kg: 50 }, extra || {});
+const entryOf = (reps, kg, extra) => ({ exerciseId: 'x', name: 'Panca', sets: reps.map((r) => Object.assign({ reps: r, kg, done: true }, extra || {})) });
+const prog = (entries) => ({ sessions: entries.map((e, i) => ({ id: 's' + i, dayId: 'd', completedAt: 1000 * (i + 1), exercises: [e] })) });
+t('progressione: 7–11 rip. propone una ripetizione in più per serie, solo dopo due sessioni riuscite', () => {
+  const ok = entryOf([8, 8, 8], 50);
+  assert.strictEqual(L.progressionSuggestion(prog([ok]), ex8()), null);
+  const sug = L.progressionSuggestion(prog([ok, entryOf([9, 8, 8], 50)]), ex8());
+  assert.strictEqual(sug.mode, 'reps');
+  assert.deepStrictEqual(sug.setReps, [9, 9, 9]);
+  assert.strictEqual(sug.kg, 50);
+});
+t('progressione: nessun suggerimento se manca una serie, un carico o l’RPE è troppo alto', () => {
+  const ok = entryOf([8, 8, 8], 50);
+  assert.strictEqual(L.progressionSuggestion(prog([ok, entryOf([8, 8, 7], 50)]), ex8()), null);
+  assert.strictEqual(L.progressionSuggestion(prog([ok, entryOf([8, 8, 8], 47.5)]), ex8()), null);
+  assert.strictEqual(L.progressionSuggestion(prog([ok, entryOf([8, 8, 8], 50, { rpe: 9.5 })]), ex8()), null);
+  const undone = entryOf([8, 8, 8], 50); undone.sets[2].done = false;
+  assert.strictEqual(L.progressionSuggestion(prog([ok, undone]), ex8()), null);
+});
+t('progressione: con tutte le serie a 12 si sale di carico e le ripetizioni scendono', () => {
+  const t12 = L.nextTarget(ex8({ reps: 12 }));
+  assert.deepStrictEqual([t12.mode, t12.kg, t12.setReps], ['weight', 52.5, [8, 8, 8]]);
+  assert.strictEqual(L.nextTarget(ex8({ reps: 12, kg: 10 })).kg, 11);
+});
+t('progressione: fino a 6 ripetizioni si aumenta solo il carico', () => {
+  const t5 = L.nextTarget(ex8({ reps: 5 }));
+  assert.deepStrictEqual([t5.mode, t5.kg, t5.setReps], ['weight', 52.5, [5, 5, 5]]);
+});
+t('progressione: serie diverse crescono solo sotto il tetto; a corpo libero si aggiungono ripetizioni', () => {
+  assert.deepStrictEqual(L.nextTarget(ex8({ setReps: [12, 10, 8], reps: 12 })).setReps, [12, 11, 9]);
+  const body = L.nextTarget(ex8({ kg: 0, reps: 15 }));
+  assert.deepStrictEqual([body.mode, body.kg, body.setReps], ['reps', 0, [16, 16, 16]]);
+  assert.strictEqual(L.nextTarget(ex8({ kg: 0, reps: 30 })), null);
+});
+t('progressione: riscaldamento e cedimenti non contano, e le sostituzioni di un giorno vengono ignorate', () => {
+  const e = ex8({ setTypes: ['warmup', 'normal', 'normal'], setReps: [10, 8, 8] });
+  const sess = { exerciseId: 'x', name: 'Panca', sets: [{ reps: 5, kg: 20, done: true, type: 'warmup' }, { reps: 8, kg: 50, done: true }, { reps: 8, kg: 50, done: true }] };
+  assert.strictEqual(L.sessionMeetsTarget(sess, e), true);
+  assert.deepStrictEqual(L.nextTarget(e).setReps, [10, 9, 9]);
+  const swapped = Object.assign(entryOf([8, 8, 8], 50), { substitute: true });
+  assert.strictEqual(L.progressionSuggestion(prog([entryOf([8, 8, 8], 50), swapped]), ex8()), null);
+});
+t('applyTarget e retargetSession aggiornano obiettivo e solo le serie normali non ancora fatte', () => {
+  const e = ex8({ setReps: [8, 8, 6] });
+  L.applyTarget(e, 52.5, [9, 9, 9]);
+  assert.deepStrictEqual([e.kg, e.reps, e.setReps], [52.5, 9, undefined]);
+  const entry = { sets: [{ reps: 5, kg: 20, done: false, type: 'warmup' }, { reps: 8, kg: 50, done: true }, { reps: 8, kg: 50, done: false }, { reps: 8, kg: 50, done: false }] };
+  L.retargetSession(entry, e);
+  assert.deepStrictEqual(entry.sets.map((x) => [x.reps, x.kg]), [[5, 20], [8, 50], [9, 52.5], [9, 52.5]]);
+});
+t('il catalogo riconosce gli esercizi anche con nomi diversi', () => {
+  assert.strictEqual(L.findCatalog('Panca Piana').name, 'Panca piana');
+  assert.strictEqual(L.findCatalog('lento avanti').name, 'Military press');
+  assert.strictEqual(L.findCatalog('Panca piana manubri 30°').name, 'Panca piana manubri');
+  assert.strictEqual(L.findCatalog('Esercizio inventato'), null);
+  assert.strictEqual(L.CATALOG.length, new Set(L.CATALOG.map((c) => c.name)).size);
+});
+t('le sostituzioni propongono prima lo stesso movimento con un altro attrezzo e saltano quelli già nella giornata', () => {
+  const day = [{ name: 'Panca piana' }, { name: 'Croci ai cavi' }];
+  const r = L.substituteSuggestions({ name: 'Panca piana' }, day, '');
+  assert.strictEqual(r.group, 'Petto');
+  assert.strictEqual(r.items[0].samePattern, true);
+  assert.notStrictEqual(r.items[0].equipment, 'bilanciere');
+  assert.ok(!r.items.some((i) => i.name === 'Panca piana' || i.name === 'Croci ai cavi'));
+  assert.ok(r.items.length <= 6);
+  const noGroup = L.substituteSuggestions({ name: 'Esercizio inventato' }, [], '');
+  assert.deepStrictEqual(noGroup, { group: null, items: [] });
+  assert.ok(L.substituteSuggestions({ name: 'Esercizio inventato' }, [], 'Spalle').items.length > 0);
+});
+t('il carico di partenza della sostituzione è prudente', () => {
+  assert.strictEqual(L.substituteKg(60, 'bilanciere', 'manubri'), 25);
+  assert.strictEqual(L.substituteKg(20, 'manubri', 'bilanciere'), 40);
+  assert.strictEqual(L.substituteKg(50, 'macchina', 'macchina'), 35);
+  assert.strictEqual(L.substituteKg(50, 'bilanciere', 'corpo libero'), 0);
+  assert.strictEqual(L.substituteKg(0, 'bilanciere', 'manubri'), 0);
+  const sub = L.makeSubstitute({ id: 'a', name: 'Panca piana', setCount: 4, reps: 8, kg: 60, note: 'vecchia', setReps: [10, 8, 8, 6] }, { name: 'Chest press', group: 'Petto', equipment: 'macchina' }, 'nuovo');
+  assert.deepStrictEqual([sub.id, sub.name, sub.group, sub.setCount, sub.kg, sub.note], ['nuovo', 'Chest press', 'Petto', 4, 42.5, undefined]);
+  assert.deepStrictEqual(sub.setReps, [10, 8, 8, 6]);
+});
+t('lo storico, i progressi e il confronto ignorano le sostituzioni «solo oggi»', () => {
+  const real = { id: 's1', dayId: 'd', completedAt: 100, exercises: [{ exerciseId: 'x', name: 'Panca', sets: [{ reps: 8, kg: 50, done: true }] }] };
+  const swapped = { id: 's2', dayId: 'd', completedAt: 200, exercises: [{ exerciseId: 'x', name: 'Chest press', substitute: true, sets: [{ reps: 8, kg: 30, done: true }] }] };
+  assert.strictEqual(L.exerciseHistory({ sessions: [real, swapped] }, 'x').length, 1);
+  assert.deepStrictEqual(L.compareSessions(real, swapped).exercises, []);
+});
+t('il volume settimanale è una serie di settimane da lunedì, con quella in corso per ultima', () => {
+  const mon = (y, m, d, h) => new Date(y, m, d, h || 12).getTime();
+  const now = mon(2026, 10, 20);                       // venerdì 20 novembre 2026
+  const mk = (id, t, kg) => ({ id, dayId: 'd', completedAt: t, exercises: [{ exerciseId: 'x', sets: [{ reps: 10, kg, done: true }] }] });
+  const series = L.weeklyVolumeSeries([mk('a', mon(2026, 10, 16), 50), mk('b', mon(2026, 10, 15, 23), 10), mk('c', mon(2026, 10, 2), 20), mk('d', mon(2026, 8, 1), 99), mk('e', now + 9 * 864e5, 70)], now, 8);
+  assert.strictEqual(series.length, 8);
+  assert.strictEqual(new Date(series[7].start).getDay(), 1);
+  assert.deepStrictEqual([series[7].volume, series[7].sessions], [500, 1]);   // lunedì 16
+  assert.deepStrictEqual([series[6].volume, series[6].sessions], [100, 1]);   // domenica 15 sera
+  assert.deepStrictEqual([series[5].volume, series[5].sessions], [200, 1]);   // 2 novembre
+  assert.strictEqual(series.reduce((n, w) => n + w.sessions, 0), 3);          // fuori finestra e futuro esclusi
+});
+t('il riepilogo mensile somma sessioni, volume, giorni, gruppi e confronta con il mese prima', () => {
+  const at = (m, d) => new Date(2026, m, d, 12).getTime();
+  const sess = (id, t, name, kg, group, exId) => ({ id, dayId: name, dayName: name, completedAt: t, exercises: [{ exerciseId: exId || 'x', name: 'Panca', group, sets: [{ reps: 10, kg, done: true }, { reps: 10, kg, done: true }] }] });
+  const program = { sessions: [sess('o', at(9, 20), 'Petto', 40, 'Petto'), sess('a', at(10, 3), 'Petto', 50, 'Petto'), sess('b', at(10, 10), 'Petto', 55, 'Petto'), sess('c', at(10, 12), 'Gambe', 80, 'Gambe', 'y')] };
+  const m = L.monthlySummary(program, 2026, 10);
+  assert.deepStrictEqual([m.sessions, m.sets, m.volume, m.activeDays], [3, 6, 3700, 3]);
+  assert.deepStrictEqual(m.topDays, [{ name: 'Petto', count: 2 }, { name: 'Gambe', count: 1 }]);
+  assert.deepStrictEqual(m.groups.map((g) => [g.group, g.sets]), [['Petto', 4], ['Gambe', 2]]);
+  assert.deepStrictEqual([m.prevSessions, m.prevVolume, m.volumePct], [1, 800, 363]);
+  assert.strictEqual(L.monthlySummary(program, 2026, 5).sessions, 0);
+});
+t('il miglior progresso del mese confronta con il valore migliore precedente, o con la prima sessione del mese', () => {
+  const at = (m, d) => new Date(2026, m, d, 12).getTime();
+  const sess = (id, t, exId, name, reps, kg) => ({ id, completedAt: t, exercises: [{ exerciseId: exId, name, sets: [{ reps, kg, done: true }] }] });
+  const sessions = [sess('1', at(9, 5), 'p', 'Panca', 5, 80), sess('2', at(10, 4), 'p', 'Panca', 5, 90), sess('3', at(10, 6), 's', 'Squat', 5, 100), sess('4', at(10, 20), 's', 'Squat', 5, 105), sess('5', at(10, 9), 'z', 'Curl', 10, 20)];
+  const best = L.bestProgress(sessions, new Date(2026, 10, 1).getTime(), new Date(2026, 11, 1).getTime());
+  assert.strictEqual(best.name, 'Panca');
+  assert.deepStrictEqual([best.from, best.to, best.pct, best.unit], [93.3, 105, 13, 'kg']);
+  assert.strictEqual(L.bestProgress([sess('5', at(10, 9), 'z', 'Curl', 10, 20)], new Date(2026, 10, 1).getTime(), new Date(2026, 11, 1).getTime()), null);
+});
+
 console.log('\n' + n + ' test Allenamenti superati');
