@@ -57,6 +57,7 @@
     notes: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/>',
     restore: '<path d="M4 12a8 8 0 108-8H7M7 4L4 7l3 3"/>',
     swap: '<path d="M7 7h12M16 4l3 3-3 3M17 17H5M8 14l-3 3 3 3"/>',
+    move: '<circle cx="12" cy="5" r="2"/><path d="M12 8v6M6 11l6-3 6 3M9 21l3-7 3 7"/>',
     image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',
     copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>',
     share: '<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 11l7.6-4M8.2 13l7.6 4"/>',

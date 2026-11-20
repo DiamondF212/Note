@@ -966,3 +966,38 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 .workout-month-best span { color: var(--muted); font-size: .78rem; }
 .workout-cal-nav:disabled { opacity: .3; }
 @media (prefers-reduced-motion: reduce) { .workout-progress-card, .workout-progress-apply.is-applied { animation: none; } }
+
+/* Allenamenti v5: riscaldamento articolare, confronto tra periodi, tabella delle serie */
+.workout-mobility-card.done .workout-month-icon { color: #fff; background: #66bb6a; }
+.workout-mobility-status { font-weight: 600; }
+.workout-mobility-card.done .workout-mobility-status { color: #66bb6a; }
+.workout-mobility-progress { height: 8px; margin: 10px 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 8%, transparent); overflow: hidden; }
+.workout-mobility-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .35s var(--ease-smooth, ease); }
+.workout-mobility-count { margin: 0 0 8px; font-size: .78rem; color: var(--muted); }
+.workout-mobility-count.complete { color: #66bb6a; font-weight: 600; }
+.workout-mobility-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 2px; border-top: 1px solid var(--line); text-align: left; }
+.workout-mobility-check { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); color: transparent; transition: background .2s, border-color .2s, color .2s; }
+.workout-mobility-row.done .workout-mobility-check { background: var(--accent); border-color: var(--accent); color: #fff; }
+.workout-mobility-row.done .workout-sub-copy strong { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ink) 35%, transparent); color: var(--muted); }
+.workout-mobility-row.pop .workout-mobility-check { animation: wk-applied .42s ease both; }
+.workout-period-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.workout-period-block { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 14px; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.workout-period-block label { display: flex; flex-direction: column; gap: 2px; }
+.workout-period-block small { color: var(--muted); font-size: .68rem; }
+.workout-period-block .field { width: 100%; min-width: 0; padding: 7px 6px; font-size: .78rem; }
+.workout-period-table { margin: 4px 0; }
+.workout-period-row { display: grid; grid-template-columns: 1.7fr .8fr .8fr 1.5fr; gap: 6px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: .78rem; }
+.workout-period-row.head { border-top: 0; color: var(--muted); font-size: .68rem; font-weight: 600; }
+.workout-period-row span:nth-child(n+2), .workout-period-row b { text-align: right; }
+.workout-period-row.head span:nth-child(n+2) { text-align: right; }
+.workout-period-row b { font-size: .74rem; }
+.workout-period-row b.up, .workout-compare-row b.up { color: #66bb6a; }
+.workout-period-row b.down, .workout-compare-row b.down { color: var(--danger); }
+.workout-table { margin-top: 4px; }
+.workout-table-row { display: grid; grid-template-columns: 1.25fr .8fr 1fr .9fr 1.1fr; gap: 4px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: .8rem; }
+.workout-table-row span:nth-child(n+2), .workout-table-row .workout-table-th:nth-child(n+2) { text-align: right; }
+.workout-table-row.head { position: sticky; top: 0; z-index: 1; border-top: 0; background: var(--surface); padding: 4px 0 8px; }
+.workout-table-th { padding: 6px 0; font-size: .7rem; font-weight: 600; color: var(--muted); text-align: left; white-space: nowrap; }
+.workout-table-th.sorted { color: var(--accent); }
+.workout-table-row em { margin-left: 4px; font-style: normal; font-size: .62rem; color: var(--muted); }
+.workout-table-row.warm { color: var(--muted); }

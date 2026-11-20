@@ -211,12 +211,15 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' atteso «' 
     const names = () => page.evaluate(() => window.N.workouts._state.program.days.find((d) => d.name === 'Petto e tricipiti').exercises.map((e) => e.name).join('|'));
     const prima = await names();
     // In sessione le card sono alte: si trascina la seconda sopra la prima, misurando dopo lo scorrimento.
-    await page.evaluate(() => { const b = document.querySelector('.workout-body'); if (b) b.scrollTop = 0; });
+    // La barra in basso copre la fine dello schermo: si porta la maniglia a metà altezza, ben sopra la barra.
+    await page.evaluate(() => {
+      const body = document.querySelector('.workout-body'), grip = document.querySelectorAll('.workout-exercise-card .workout-grip')[1];
+      if (body && grip) body.scrollTop += grip.getBoundingClientRect().top - 560;
+    });
     const handle = page.locator('.workout-exercise-card .workout-grip').nth(1);
-    await handle.scrollIntoViewIfNeeded();
     const first = await page.locator('.workout-exercise-card').nth(0).boundingBox();
     const b = await handle.boundingBox();
-    const x = b.x + b.width / 2, y = b.y + b.height / 2, toY = Math.max(first.y + 4, 12);
+    const x = b.x + b.width / 2, y = b.y + b.height / 2, toY = Math.max(first.y + 4, 130);
     await touch('touchStart', x, y);
     for (let i = 1; i <= 14; i++) await touch('touchMove', x, y + (toY - y) * i / 14);
     await touch('touchEnd');

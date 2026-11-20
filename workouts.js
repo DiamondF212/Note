@@ -53,12 +53,12 @@
     const p = raw && typeof raw === 'object' ? raw : {};
     return {
       id: STORE_ID,
-      days: Array.isArray(p.days) ? p.days.filter((d) => d && d.id).map((d) => ({
+      days: Array.isArray(p.days) ? p.days.filter((d) => d && d.id).map((d) => Object.assign({
         id: String(d.id), name: cleanName(d.name) || 'Giornata', weekday: WEEKDAYS.includes(d.weekday) ? d.weekday : '',
         created: Number(d.created) || Date.now(),
         exercises: Array.isArray(d.exercises) ? d.exercises.filter((e) => e && e.id).map(normalizeExercise) : [],
         activeSession: d.activeSession && Array.isArray(d.activeSession.exercises) ? d.activeSession : null
-      })) : [],
+      }, mobilityField(d.mobility))) : [],
       sessions: Array.isArray(p.sessions) ? p.sessions.filter((s) => s && s.id && Array.isArray(s.exercises)) : [],
       bodyWeights: (Array.isArray(p.bodyWeights) ? p.bodyWeights : [])
         .map((w) => ({ t: Number(w && w.t), kg: bodyWeight(w && w.kg) }))
@@ -543,6 +543,7 @@
     renderVolumeChart(body);
     renderWeeklyVolume(body);
     renderMonthCard(body);
+    renderPeriodsCard(body);
     renderConsistency(body);
     renderBodyWeight(body);
     renderBackup(body);
@@ -561,6 +562,7 @@
       ctx.h('h3', { class: 'workout-day-title' }, day.name),
       ctx.h('p', { class: 'workout-day-sub' }, active ? 'Sessione in corso · i dati si salvano automaticamente.' : exerciseCount ? setCount + ' serie previste · il tuo piano è pronto.' : 'Aggiungi gli esercizi che farai in questa sessione.')
     ));
+    if (exerciseCount) renderMobilityCard(body, day);
     body.append(ctx.h('div', { class: 'workout-section-heading' },
       ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, active ? 'SESSIONE' : 'LA TUA SCHEDA'), ctx.h('h3', null, active ? 'Registra le serie' : 'Esercizi')),
       ctx.h('button', { class: 'workout-add-exercise', 'data-workout-add-exercise': '1', onclick: () => openExerciseForm(day.id) }, ctx.h('span', { html: ctx.I('plus', 17) }), 'Aggiungi')
@@ -1123,6 +1125,146 @@
     draw();
   }
 
+  /* ---------- Riscaldamento articolare ---------- */
+  function paintMobility(btn, day) {
+    const prog = mobilityProgress(day, Date.now());
+    const complete = prog.total > 0 && prog.done === prog.total;
+    btn.classList.toggle('done', complete);
+    btn.querySelector('.workout-mobility-status').textContent = complete ? 'Completato oggi' : prog.done + ' / ' + prog.total + ' fatti oggi';
+  }
+  function renderMobilityCard(body, day) {
+    const plan = mobilityPlan(day);
+    const btn = ctx.h('button', { class: 'workout-card workout-month-card workout-mobility-card', type: 'button', 'data-workout-mobility': '1', onclick: () => openMobility(day.id) },
+      ctx.h('span', { class: 'workout-month-icon', html: ctx.I('move', 20) }),
+      ctx.h('span', { class: 'workout-month-copy' },
+        ctx.h('strong', null, 'Riscaldamento articolare'),
+        ctx.h('small', null, plan.length + ' movimenti · circa ' + Math.max(2, Math.round(plan.length * 0.75)) + ' minuti'),
+        ctx.h('small', { class: 'workout-mobility-status' }, '')),
+      ctx.h('span', { class: 'workout-chevron', 'aria-hidden': 'true' }, '›'));
+    paintMobility(btn, day);
+    body.append(btn);
+  }
+  function openMobility(dayId) {
+    const day = dayById(dayId);
+    if (!day) return;
+    const plan = mobilityPlan(day);
+    const box = ctx.h('div', { class: 'workout-mobility', 'data-workout-mobility-sheet': '1' });
+    let popped = null;
+    function draw() {
+      const done = new Set(mobilityDone(day, Date.now()));
+      const count = plan.filter((m) => done.has(m.id)).length;
+      const all = count === plan.length;
+      const parts = [
+        ctx.h('p', { class: 'hint' }, 'Fai ogni movimento lento e controllato, senza forzare e senza dolore. Spunta quelli che hai fatto.'),
+        ctx.h('div', { class: 'workout-mobility-progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(plan.length), 'aria-valuenow': String(count) },
+          ctx.h('span', { style: { width: Math.round((count / plan.length) * 100) + '%' } })),
+        ctx.h('p', { class: 'workout-mobility-count' + (all ? ' complete' : ''), 'data-mobility-count': '1' }, all ? 'Completato · sei pronto per allenarti' : count + ' di ' + plan.length)
+      ];
+      plan.forEach((m) => parts.push(ctx.h('button', {
+        class: 'workout-mobility-row' + (done.has(m.id) ? ' done' : '') + (popped === m.id ? ' pop' : ''), type: 'button',
+        'data-mobility-id': m.id, 'aria-pressed': String(done.has(m.id)), onclick: () => change(() => { popped = toggleMobility(day, m.id, Date.now()) ? m.id : null; })
+      }, ctx.h('span', { class: 'workout-mobility-check', html: ctx.I('check', 16) }),
+        ctx.h('span', { class: 'workout-sub-copy' }, ctx.h('strong', null, m.name), ctx.h('small', null, m.detail + ' · ' + m.area)))));
+      parts.push(ctx.h('div', { class: 'btns' }, ctx.h('button', { class: 'btn', type: 'button', 'data-mobility-all': '1', onclick: () => change(() => { popped = null; setAllMobility(day, plan.map((m) => m.id), !all, Date.now()); }) }, all ? 'Azzera' : 'Segna tutto')));
+      box.replaceChildren(...parts);
+    }
+    function change(fn) {
+      fn();
+      const btn = document.querySelector('[data-workout-mobility]');
+      if (btn) paintMobility(btn, day);
+      draw();
+      save().catch(onSaveError);
+    }
+    ctx.openSheet('Riscaldamento articolare', box);
+    draw();
+  }
+
+  /* ---------- Confronto tra due periodi ---------- */
+  function renderPeriodsCard(body) {
+    if (state.program.sessions.length < 2) return;
+    body.append(ctx.h('button', { class: 'workout-card workout-month-card', type: 'button', 'data-workout-periods': '1', onclick: openPeriods },
+      ctx.h('span', { class: 'workout-month-icon', html: ctx.I('chart', 20) }),
+      ctx.h('span', { class: 'workout-month-copy' },
+        ctx.h('strong', null, 'Confronta due periodi'),
+        ctx.h('small', null, 'Volume, sessioni e progressi tra due intervalli di date')),
+      ctx.h('span', { class: 'workout-chevron', 'aria-hidden': 'true' }, '›')));
+  }
+  function openPeriods() {
+    const key = (d) => dayKey(d.getTime());
+    const back = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return key(d); };
+    const presets = {
+      mese: () => {
+        const n = new Date();
+        return { a: [key(new Date(n.getFullYear(), n.getMonth() - 1, 1)), key(new Date(n.getFullYear(), n.getMonth(), 0))], b: [key(new Date(n.getFullYear(), n.getMonth(), 1)), back(0)] };
+      },
+      settimane: () => ({ a: [back(55), back(28)], b: [back(27), back(0)] }),
+      mesi: () => ({ a: [back(181), back(91)], b: [back(90), back(0)] })
+    };
+    let cur = presets.settimane(), active = 'settimane';
+    const inputs = {};
+    const box = ctx.h('div', { class: 'workout-periods', 'data-workout-periods-sheet': '1' });
+    const results = ctx.h('div', { class: 'workout-period-results', 'data-period-results': '1' });
+    const chips = ctx.h('div', { class: 'workout-chips', role: 'group', 'aria-label': 'Confronti rapidi' });
+    function paintChips() {
+      chips.replaceChildren(...[['settimane', 'Ultime 4 settimane'], ['mese', 'Questo mese e il precedente'], ['mesi', 'Ultimi 3 mesi']].map(([id, label]) => ctx.h('button', {
+        class: 'workout-chip' + (active === id ? ' active' : ''), type: 'button', 'data-period-preset': id, 'aria-pressed': String(active === id),
+        onclick: () => { cur = presets[id](); active = id; ['a', 'b'].forEach((p) => [0, 1].forEach((i) => { inputs[p + i].value = cur[p][i]; })); paintChips(); drawResults(); }
+      }, label)));
+    }
+    function field(period, i, label) {
+      const attrs = { class: 'field', type: 'date', value: cur[period][i], 'aria-label': label };
+      attrs['data-period-' + period + (i ? '-to' : '-from')] = '1';
+      const input = ctx.h('input', attrs);
+      input.addEventListener('change', () => { cur[period][i] = input.value; active = ''; paintChips(); drawResults(); });
+      inputs[period + i] = input;
+      return input;
+    }
+    const block = (period, title) => ctx.h('div', { class: 'workout-period-block' },
+      ctx.h('strong', null, title),
+      ctx.h('label', null, ctx.h('small', null, 'Dal'), field(period, 0, title + ': data iniziale')),
+      ctx.h('label', null, ctx.h('small', null, 'Al'), field(period, 1, title + ': data finale')));
+    const shown = (n) => fmtKg(n);
+    const change = (d) => d.diff === 0 ? '=' : signed(d.diff) + (d.pct != null ? ' (' + (d.pct > 0 ? '+' : '') + d.pct + '%)' : '');
+    const tone = (d) => (d.diff > 0 ? ' up' : d.diff < 0 ? ' down' : '');
+    function drawResults() {
+      const ra = periodRange(cur.a[0], cur.a[1]), rb = periodRange(cur.b[0], cur.b[1]);
+      if (!ra || !rb) {
+        results.replaceChildren(ctx.h('p', { class: 'hint', 'data-period-error': '1' }, 'Controlla le date: in ogni periodo quella iniziale deve venire prima di quella finale.'));
+        return;
+      }
+      const c = comparePeriods(state.program, ra, rb);
+      const row = (label, a, b, d, cls) => ctx.h('div', { class: 'workout-period-row' + (cls ? ' ' + cls : ''), role: 'row' },
+        ctx.h('span', null, label), ctx.h('span', null, a), ctx.h('span', null, b), ctx.h('b', { class: tone(d) }, d.diff === undefined ? '' : change(d)));
+      const metrics = [['Sessioni', 'sessions'], ['Serie', 'sets'], ['Volume (kg)', 'volume'], ['Giorni attivi', 'activeDays'], ['Volume a sessione (kg)', 'avgVolume'], ['Sessioni a settimana', 'perWeek']];
+      const parts = [ctx.h('div', { class: 'workout-period-table', role: 'table', 'data-period-table': '1' },
+        ctx.h('div', { class: 'workout-period-row head', role: 'row' }, ctx.h('span', null, ''), ctx.h('span', null, 'A'), ctx.h('span', null, 'B'), ctx.h('span', null, 'B − A')),
+        ...metrics.map(([label, k]) => row(label, shown(c.a[k]), shown(c.b[k]), c.deltas[k])))];
+      if (!c.a.sessions || !c.b.sessions) parts.push(ctx.h('p', { class: 'hint', 'data-period-empty': '1' }, 'Nel periodo ' + (!c.a.sessions && !c.b.sessions ? 'A e nel periodo B' : !c.a.sessions ? 'A' : 'B') + ' non ci sono sessioni.'));
+      if (c.groups.length) {
+        parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Serie per gruppo muscolare'));
+        parts.push(ctx.h('div', { class: 'workout-period-table', 'data-period-groups': '1' },
+          ...c.groups.map((g) => row(g.group, String(g.a), String(g.b), { diff: g.b - g.a, pct: g.a > 0 ? Math.round(((g.b - g.a) / g.a) * 100) : null }))));
+      }
+      if (c.exercises.length) {
+        parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Esercizi in comune'));
+        c.exercises.slice(0, 8).forEach((e) => parts.push(ctx.h('div', { class: 'workout-compare-row', 'data-period-exercise': e.name },
+          ctx.h('span', null, e.name + ' · ' + shown(e.from) + ' → ' + shown(e.to) + (e.unit === 'kg' ? ' kg' : ' rip')),
+          ctx.h('b', { class: tone(e) }, change(e)))));
+        parts.push(ctx.h('p', { class: 'hint' }, 'Per i kg si usa il massimale stimato; a corpo libero, le ripetizioni.'));
+      } else if (c.a.sessions && c.b.sessions) {
+        parts.push(ctx.h('p', { class: 'hint' }, 'Nessun esercizio in comune tra i due periodi.'));
+      }
+      results.replaceChildren(...parts);
+    }
+    box.append(chips, ctx.h('div', { class: 'workout-period-inputs' }, block('a', 'Periodo A'), block('b', 'Periodo B')), results);
+    ctx.openSheet('Confronta due periodi', box);
+    paintChips();
+    drawResults();
+  }
+
+  /* ---------- Storico per esercizio in tabella ---------- */
+  function compactDate(ts) { return new Date(ts).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' }); }
+
   /* ---------- Riscaldamento, confronto, volume settimanale, backup ---------- */
   async function addWarmup(current, work) {
     const plan = warmupPlan(work.kg, work.reps);
@@ -1456,27 +1598,64 @@
     if (!ex) return;
     const history = exerciseHistory(state.program, ex.id).map((p) => Object.assign({ label: fmtDate(p.t) }, p));
     const body = ctx.h('div', { class: 'workout-progress' });
-    if (!history.length) {
-      body.append(ctx.h('p', { class: 'hint' }, 'Ancora nessun dato. Completa almeno una serie in una sessione per vedere i progressi.'));
-    } else {
+    let view = 'chart';
+    const table = { key: 't', dir: 'desc', warm: false };
+    function chartNodes() {
+      if (!history.length) return [ctx.h('p', { class: 'hint' }, 'Ancora nessun dato. Completa almeno una serie in una sessione per vedere i progressi.')];
       const last = history[history.length - 1];
-      body.append(ctx.h('p', { class: 'hint' }, history.length + (history.length === 1 ? ' sessione registrata' : ' sessioni registrate') + ' · ultimo: ' + fmtKg(last.kg) + ' kg × ' + last.reps));
-      if (history.length === 1) body.append(ctx.h('p', { class: 'hint' }, 'Completa un’altra sessione per vedere l’andamento nel tempo.'));
-      body.append(ctx.h('h4', { class: 'wk-chart-title' }, 'Carico massimo (kg)'),
+      const nodes = [ctx.h('p', { class: 'hint' }, history.length + (history.length === 1 ? ' sessione registrata' : ' sessioni registrate') + ' · ultimo: ' + fmtKg(last.kg) + ' kg × ' + last.reps)];
+      if (history.length === 1) nodes.push(ctx.h('p', { class: 'hint' }, 'Completa un’altra sessione per vedere l’andamento nel tempo.'));
+      nodes.push(ctx.h('h4', { class: 'wk-chart-title' }, 'Carico massimo (kg)'),
         ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(history, 'kg', 'Carico massimo in kg di ' + ex.name) }));
-      body.append(ctx.h('h4', { class: 'wk-chart-title' }, 'Ripetizioni'),
+      nodes.push(ctx.h('h4', { class: 'wk-chart-title' }, 'Ripetizioni'),
         ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(history, 'reps', 'Ripetizioni di ' + ex.name) }));
-      body.append(ctx.h('p', { class: 'hint' }, 'Per ogni sessione viene mostrata la serie più pesante completata.'));
+      nodes.push(ctx.h('p', { class: 'hint' }, 'Per ogni sessione viene mostrata la serie più pesante completata.'));
       const best = bestOneRm(history);
       if (best) {
-        body.append(ctx.h('div', { class: 'workout-orm', 'data-workout-orm': '1' },
+        nodes.push(ctx.h('div', { class: 'workout-orm', 'data-workout-orm': '1' },
           ctx.h('span', null, 'Massimale stimato'),
           ctx.h('strong', null, fmtKg(best.value) + ' kg'),
           ctx.h('small', null, 'da ' + fmtKg(best.kg) + ' kg × ' + best.reps + ' · ' + fmtDate(best.t))));
-        body.append(ctx.h('p', { class: 'hint' }, 'Stima con la formula di Epley, valida fino a 12 ripetizioni: è un’indicazione, non un test.'));
+        nodes.push(ctx.h('p', { class: 'hint' }, 'Stima con la formula di Epley, valida fino a 12 ripetizioni: è un’indicazione, non un test.'));
       }
+      return nodes;
+    }
+    function tableNodes() {
+      const rows = sortSets(exerciseSets(state.program, ex.id, table.warm), table.key, table.dir);
+      const nodes = [ctx.h('div', { class: 'workout-chips' }, ctx.h('button', {
+        class: 'workout-chip' + (table.warm ? ' active' : ''), type: 'button', 'data-table-warm': '1', 'aria-pressed': String(table.warm),
+        onclick: () => { table.warm = !table.warm; draw(); }
+      }, 'Con riscaldamento'))];
+      if (!rows.length) { nodes.push(ctx.h('p', { class: 'hint', 'data-table-empty': '1' }, 'Nessuna serie completata per questo esercizio.')); return nodes; }
+      const cols = [['t', 'Data'], ['n', 'Serie'], ['kg', 'Kg'], ['reps', 'Rip.'], ['volume', 'Volume']];
+      const list = ctx.h('div', { class: 'workout-table', role: 'table', 'data-workout-table': '1' },
+        ctx.h('div', { class: 'workout-table-row head', role: 'row' }, ...cols.map(([k, label]) => ctx.h('button', {
+          class: 'workout-table-th' + (table.key === k ? ' sorted' : ''), type: 'button', role: 'columnheader', 'data-table-sort': k,
+          'aria-sort': table.key === k ? (table.dir === 'asc' ? 'ascending' : 'descending') : 'none',
+          onclick: () => { if (table.key === k) table.dir = table.dir === 'asc' ? 'desc' : 'asc'; else { table.key = k; table.dir = k === 'n' ? 'asc' : 'desc'; } draw(); }
+        }, label + (table.key === k ? (table.dir === 'asc' ? ' ▲' : ' ▼') : '')))));
+      rows.forEach((r) => list.append(ctx.h('div', { class: 'workout-table-row' + (r.type === 'warmup' ? ' warm' : ''), role: 'row', 'data-table-row': '1' },
+        ctx.h('span', null, compactDate(r.t)),
+        ctx.h('span', null, String(r.n), r.type !== 'normal' ? ctx.h('em', null, SET_TYPE_SHORT[r.type]) : null),
+        ctx.h('span', null, fmtKg(r.kg)), ctx.h('span', null, String(r.reps)), ctx.h('span', null, fmtKg(r.volume)))));
+      nodes.push(list);
+      const top = Math.max.apply(null, rows.filter((r) => r.type !== 'warmup').map((r) => r.kg).concat([0]));
+      nodes.push(ctx.h('p', { class: 'hint', 'data-table-summary': '1' }, rows.length + (rows.length === 1 ? ' serie completata' : ' serie completate') + (top > 0 ? ' · carico massimo ' + fmtKg(top) + ' kg' : '') + '. Tocca un’intestazione per ordinare.'));
+      return nodes;
+    }
+    function draw() {
+      const nodes = [];
+      if (history.length) {
+        nodes.push(ctx.h('div', { class: 'workout-segment', role: 'group', 'aria-label': 'Come mostrare i progressi' },
+          ...[['chart', 'Grafico'], ['table', 'Tabella']].map(([value, label]) => ctx.h('button', {
+            class: 'workout-segment-btn' + (view === value ? ' active' : ''), type: 'button', 'data-progress-view': value, 'aria-pressed': String(view === value),
+            onclick: () => { view = value; draw(); }
+          }, label))));
+      }
+      body.replaceChildren(...nodes.concat(view === 'table' ? tableNodes() : chartNodes()));
     }
     ctx.openSheet(ex.name, body);
+    draw();
   }
   function dayOptions(id) {
     const day = dayById(id);
@@ -1924,7 +2103,166 @@
     };
   }
 
-  const _logic = { progressionSuggestion, nextTarget, applyTarget, retargetSession, sessionMeetsTarget, findCatalog, substituteSuggestions, substituteKg, makeSubstitute, weeklyVolumeSeries, monthlySummary, bestProgress, groupVolumeBetween, CATALOG, cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet,
+  /* ---------- Riscaldamento articolare ---------- */
+  // [id, nome, dettaglio, zona, gruppi muscolari per cui serve]. L'ordine è dall'alto in basso del corpo.
+  const MOBILITY = [
+    ['collo', 'Rotazioni del collo', '8 per lato, lente', 'Collo', ['Spalle', 'Dorso', 'Petto']],
+    ['cerchi-braccia', 'Cerchi con le braccia', '10 avanti e 10 indietro', 'Spalle', ['Spalle', 'Petto', 'Dorso', 'Bicipiti', 'Tricipiti']],
+    ['dislocazioni', 'Dislocazioni con asciugamano', '10 ripetizioni, braccia tese', 'Spalle', ['Spalle', 'Petto', 'Dorso']],
+    ['polsi', 'Cerchi dei polsi', '10 per verso', 'Polsi', ['Petto', 'Spalle', 'Bicipiti', 'Tricipiti']],
+    ['retrazioni', 'Retrazioni delle scapole', '10, stringendo i dorsali', 'Scapole', ['Dorso', 'Petto', 'Spalle']],
+    ['toracica', 'Rotazioni toraciche in quadrupedia', '8 per lato', 'Colonna', ['Petto', 'Dorso', 'Spalle']],
+    ['gatto-cammello', 'Gatto-cammello', '10 lente', 'Colonna', ['Dorso', 'Addome', 'Glutei', 'Gambe']],
+    ['busto', 'Rotazioni del busto', '10 per lato', 'Busto', ['Addome', 'Dorso']],
+    ['anche', 'Cerchi delle anche', '10 per lato', 'Anche', ['Gambe', 'Glutei', 'Addome']],
+    ['oscillazioni', 'Oscillazioni delle gambe', '10 per lato, avanti e indietro', 'Anche', ['Gambe', 'Glutei']],
+    ['affondo-rot', 'Affondo con rotazione', '5 per lato', 'Anche e schiena', ['Gambe', 'Glutei']],
+    ['ponte', 'Ponte glutei a corpo libero', '10, due secondi in alto', 'Anche', ['Glutei', 'Gambe', 'Addome']],
+    ['squat-libero', 'Squat a corpo libero lento', '10 ripetizioni', 'Ginocchia', ['Gambe', 'Glutei']],
+    ['caviglie', 'Cerchi delle caviglie', '10 per verso', 'Caviglie', ['Gambe', 'Glutei']]
+  ].map((r) => ({ id: r[0], name: r[1], detail: r[2], area: r[3], groups: r[4] }));
+  const MOBILITY_DEFAULT = ['cerchi-braccia', 'gatto-cammello', 'busto', 'anche', 'squat-libero'];
+  const MOBILITY_MAX = 6;
+  // Gruppi muscolari della giornata: quello scelto per l'esercizio, o quello del catalogo se il nome è noto.
+  function dayGroups(day) {
+    const out = new Set();
+    ((day && day.exercises) || []).forEach((ex) => {
+      const g = cleanGroup(ex.group) || (findCatalog(ex.name) || {}).group;
+      if (g && g !== GROUP_OTHER) out.add(g);
+    });
+    return out;
+  }
+  // Movimenti utili per i gruppi della giornata (fino a 6, dall'alto in basso); senza gruppi noti, una sequenza generale.
+  function mobilityPlan(day) {
+    const groups = dayGroups(day);
+    // Più il movimento è specifico per i gruppi della giornata (pochi gruppi, tutti presenti), più sale in classifica.
+    const scored = MOBILITY.map((m, i) => ({ m, i, hits: m.groups.filter((g) => groups.has(g)).length, score: m.groups.filter((g) => groups.has(g)).length / m.groups.length })).filter((x) => x.hits > 0);
+    const chosen = scored.length
+      ? scored.sort((a, b) => b.score - a.score || a.i - b.i).slice(0, MOBILITY_MAX).sort((a, b) => a.i - b.i).map((x) => x.m)
+      : MOBILITY_DEFAULT.map((id) => MOBILITY.find((m) => m.id === id));
+    return chosen.map((m) => ({ id: m.id, name: m.name, detail: m.detail, area: m.area }));
+  }
+  // Le spunte valgono per un giorno solo: il giorno dopo la checklist riparte vuota.
+  function mobilityDone(day, now) {
+    const m = day && day.mobility;
+    if (!m || m.date !== dayKey(now == null ? Date.now() : now) || !Array.isArray(m.done)) return [];
+    return m.done.filter((id) => typeof id === 'string');
+  }
+  function toggleMobility(day, id, now) {
+    const done = new Set(mobilityDone(day, now));
+    if (done.has(id)) done.delete(id); else done.add(id);
+    day.mobility = { date: dayKey(now == null ? Date.now() : now), done: Array.from(done) };
+    return done.has(id);
+  }
+  function setAllMobility(day, ids, on, now) {
+    day.mobility = { date: dayKey(now == null ? Date.now() : now), done: on ? ids.slice() : [] };
+  }
+  function mobilityProgress(day, now) {
+    const plan = mobilityPlan(day), done = new Set(mobilityDone(day, now));
+    return { done: plan.filter((m) => done.has(m.id)).length, total: plan.length };
+  }
+  function mobilityField(raw) {
+    if (!raw || typeof raw !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(String(raw.date))) return {};
+    const known = new Set(MOBILITY.map((m) => m.id));
+    return { mobility: { date: String(raw.date), done: Array.from(new Set((Array.isArray(raw.done) ? raw.done : []).filter((id) => known.has(id)))) } };
+  }
+
+  /* ---------- Confronto tra due periodi ---------- */
+  function parseDayKey(key) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ''));
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return d.getFullYear() === Number(m[1]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3]) ? d.getTime() : null;
+  }
+  // Dal giorno `fromKey` al giorno `toKey`, entrambi compresi. Restituisce [from, to) in millisecondi, oppure null se le date non vanno bene.
+  function periodRange(fromKey, toKey) {
+    const from = parseDayKey(fromKey), last = parseDayKey(toKey);
+    if (from == null || last == null || last < from) return null;
+    const end = new Date(last);
+    end.setDate(end.getDate() + 1);
+    return { from, to: end.getTime(), days: Math.round((end.getTime() - from) / 864e5) };
+  }
+  // Valore migliore di ogni esercizio nel periodo, per id (massimale stimato, o ripetizioni a corpo libero).
+  function bestByExercise(sessions, from, to) {
+    const out = {};
+    (sessions || []).forEach((sess) => {
+      const t = sessionTime(sess);
+      if (t < from || t >= to) return;
+      (sess.exercises || []).forEach((ex) => {
+        if (ex.substitute) return;
+        const done = (ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup');
+        if (!done.length) return;
+        const top = done.map(progressMetric).reduce((a, b) => (b.value > a.value ? b : a));
+        if (!(top.value > 0)) return;
+        if (!out[ex.exerciseId] || top.value > out[ex.exerciseId].value) out[ex.exerciseId] = { name: ex.name, value: top.value, unit: top.unit };
+      });
+    });
+    return out;
+  }
+  function periodStats(program, range) {
+    const all = (program && program.sessions) || [];
+    const list = all.filter((x) => { const t = sessionTime(x); return t >= range.from && t < range.to; });
+    const stats = list.map(sessionStats);
+    const volume = Math.round(stats.reduce((n, x) => n + x.volume, 0));
+    return {
+      sessions: list.length, sets: stats.reduce((n, x) => n + x.completedSets, 0), volume,
+      activeDays: new Set(list.map((x) => dayKey(sessionTime(x)))).size,
+      avgVolume: list.length ? Math.round(volume / list.length) : 0,
+      perWeek: Math.round((list.length / (range.days / 7)) * 10) / 10,
+      days: range.days,
+      groups: groupVolumeBetween(all, range.from, range.to),
+      best: bestByExercise(all, range.from, range.to)
+    };
+  }
+  function comparePeriods(program, a, b) {
+    const A = periodStats(program, a), B = periodStats(program, b);
+    const delta = (x, y) => ({ diff: Math.round((y - x) * 10) / 10, pct: x > 0 ? Math.round(((y - x) / x) * 100) : null });
+    const rounded = (v) => Math.round(v * 10) / 10;
+    const groups = new Map();
+    A.groups.forEach((g) => groups.set(g.group, { group: g.group, a: g.sets, b: 0 }));
+    B.groups.forEach((g) => { const r = groups.get(g.group) || { group: g.group, a: 0, b: 0 }; r.b = g.sets; groups.set(g.group, r); });
+    const exercises = [];
+    Object.keys(A.best).forEach((id) => {
+      const x = A.best[id], y = B.best[id];
+      if (!y || x.unit !== y.unit) return;
+      const d = delta(x.value, y.value);
+      exercises.push({ name: y.name, from: rounded(x.value), to: rounded(y.value), unit: x.unit, diff: d.diff, pct: d.pct });
+    });
+    exercises.sort((x, y) => (y.pct == null ? -Infinity : y.pct) - (x.pct == null ? -Infinity : x.pct) || x.name.localeCompare(y.name));
+    return {
+      a: A, b: B,
+      deltas: { sessions: delta(A.sessions, B.sessions), sets: delta(A.sets, B.sets), volume: delta(A.volume, B.volume), activeDays: delta(A.activeDays, B.activeDays), avgVolume: delta(A.avgVolume, B.avgVolume), perWeek: delta(A.perWeek, B.perWeek) },
+      groups: Array.from(groups.values()).sort((x, y) => (y.a + y.b) - (x.a + x.b) || GROUPS.indexOf(x.group) - GROUPS.indexOf(y.group)),
+      exercises
+    };
+  }
+
+  /* ---------- Storico per esercizio in tabella ---------- */
+  // Tutte le serie completate di un esercizio, una riga per serie. Il riscaldamento si include solo se richiesto.
+  function exerciseSets(program, exerciseId, includeWarmup) {
+    const rows = [];
+    ((program && program.sessions) || []).forEach((sess) => {
+      const ex = (sess.exercises || []).find((e) => e.exerciseId === exerciseId && !e.substitute);
+      if (!ex) return;
+      const t = sessionTime(sess);
+      (ex.sets || []).forEach((x, i) => {
+        if (!x || !x.done) return;
+        const type = cleanType(x.type);
+        if (type === 'warmup' && !includeWarmup) return;
+        const kg = Number(x.kg) || 0, reps = Number(x.reps) || 0;
+        rows.push({ t, sessionId: sess.id, n: i + 1, type, kg, reps, volume: Math.round(kg * reps * 10) / 10 });
+      });
+    });
+    return rows;
+  }
+  // Ordina per data, serie, kg, ripetizioni o volume. A parità, prima la sessione più recente e poi l'ordine delle serie.
+  function sortSets(rows, key, dir) {
+    const k = ['t', 'n', 'kg', 'reps', 'volume'].includes(key) ? key : 't';
+    const sign = dir === 'asc' ? 1 : -1;
+    return rows.slice().sort((a, b) => (a[k] - b[k]) * sign || b.t - a.t || a.n - b.n);
+  }
+
+  const _logic = { mobilityPlan, mobilityDone, toggleMobility, setAllMobility, mobilityProgress, mobilityField, MOBILITY, parseDayKey, periodRange, periodStats, comparePeriods, bestByExercise, exerciseSets, sortSets, progressionSuggestion, nextTarget, applyTarget, retargetSession, sessionMeetsTarget, findCatalog, substituteSuggestions, substituteKg, makeSubstitute, weeklyVolumeSeries, monthlySummary, bestProgress, groupVolumeBetween, CATALOG, cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet,
     dayKey, startOfWeek, weekStreak, weekDots, monthGrid, bodyWeight, upsertBodyWeight, dateInputToTime, reminderPlan, parseTime, SET_TYPES, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.workouts;

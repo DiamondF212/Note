@@ -413,4 +413,114 @@ t('il miglior progresso del mese confronta con il valore migliore precedente, o 
   assert.strictEqual(L.bestProgress([sess('5', at(10, 9), 'z', 'Curl', 10, 20)], new Date(2026, 10, 1).getTime(), new Date(2026, 11, 1).getTime()), null);
 });
 
+/* ---------- riscaldamento articolare, confronto tra periodi, tabella delle serie ---------- */
+const dayWith = (...exs) => ({ id: 'd', name: 'G', exercises: exs.map((e, i) => Object.assign({ id: 'e' + i, setCount: 3, reps: 8, kg: 20 }, e)) });
+t('il riscaldamento articolare sceglie i movimenti per i gruppi della giornata, dall’alto in basso', () => {
+  const legs = L.mobilityPlan(dayWith({ name: 'Squat', group: 'Gambe' }));
+  assert.ok(legs.length >= 4 && legs.length <= 6);
+  const ids = legs.map((m) => m.id);
+  ['anche', 'squat-libero', 'caviglie'].forEach((id) => assert.ok(ids.includes(id), id));
+  assert.ok(!ids.includes('collo') && !ids.includes('polsi'));
+  const order = L.MOBILITY.map((m) => m.id);
+  assert.deepStrictEqual(ids, order.filter((id) => ids.includes(id)), 'ordine del catalogo');
+  const upper = L.mobilityPlan(dayWith({ name: 'Panca', group: 'Petto' }, { name: 'Curl', group: 'Bicipiti' })).map((m) => m.id);
+  assert.ok(upper.includes('cerchi-braccia') && upper.includes('polsi'));
+});
+t('il riscaldamento articolare usa il catalogo se manca il gruppo e una sequenza generale se non c’è nulla da riconoscere', () => {
+  const byName = L.mobilityPlan(dayWith({ name: 'Leg press' })).map((m) => m.id);
+  assert.ok(byName.includes('anche'));
+  assert.deepStrictEqual(L.mobilityPlan(dayWith({ name: 'Esercizio inventato' })).map((m) => m.id), ['cerchi-braccia', 'gatto-cammello', 'busto', 'anche', 'squat-libero']);
+  assert.strictEqual(L.mobilityPlan({ exercises: [] }).length, 5);
+});
+t('le spunte del riscaldamento articolare valgono un giorno solo', () => {
+  const day = dayWith({ name: 'Squat', group: 'Gambe' });
+  const mon = new Date(2026, 10, 16, 10).getTime(), tue = new Date(2026, 10, 17, 10).getTime();
+  assert.deepStrictEqual(L.mobilityDone(day, mon), []);
+  assert.strictEqual(L.toggleMobility(day, 'anche', mon), true);
+  L.toggleMobility(day, 'caviglie', mon);
+  assert.deepStrictEqual(L.mobilityDone(day, mon).sort(), ['anche', 'caviglie']);
+  assert.deepStrictEqual(day.mobility.date, '2026-11-16');
+  assert.strictEqual(L.toggleMobility(day, 'anche', mon), false);
+  assert.deepStrictEqual(L.mobilityDone(day, mon), ['caviglie']);
+  assert.deepStrictEqual(L.mobilityDone(day, tue), [], 'il giorno dopo riparte vuoto');
+  assert.deepStrictEqual(L.mobilityProgress(day, mon), { done: 1, total: L.mobilityPlan(day).length });
+  L.setAllMobility(day, L.mobilityPlan(day).map((m) => m.id), true, mon);
+  assert.strictEqual(L.mobilityProgress(day, mon).done, L.mobilityProgress(day, mon).total);
+  L.setAllMobility(day, [], false, mon);
+  assert.deepStrictEqual(L.mobilityDone(day, mon), []);
+});
+t('il riscaldamento articolare si conserva nella scheda e nel backup, scartando i dati non validi', () => {
+  const prog = { days: [
+    { id: 'a', name: 'A', exercises: [], mobility: { date: '2026-11-16', done: ['anche', 'anche', 'inventato', 5] } },
+    { id: 'b', name: 'B', exercises: [] },
+    { id: 'c', name: 'C', exercises: [], mobility: { date: 'ieri', done: ['anche'] } }] };
+  const back = L.parseBackup(JSON.stringify(L.makeBackup(prog, 0)));
+  assert.deepStrictEqual(back.days[0].mobility, { date: '2026-11-16', done: ['anche'] });
+  assert.ok(!('mobility' in back.days[1]), 'senza spunte il campo non compare');
+  assert.ok(!('mobility' in back.days[2]));
+});
+t('un periodo va da un giorno all’altro, compresi, e le date sbagliate si rifiutano', () => {
+  const r = L.periodRange('2026-11-01', '2026-11-30');
+  assert.strictEqual(r.days, 30);
+  assert.strictEqual(r.from, new Date(2026, 10, 1).getTime());
+  assert.strictEqual(r.to, new Date(2026, 11, 1).getTime());
+  assert.strictEqual(L.periodRange('2026-11-05', '2026-11-05').days, 1);
+  assert.strictEqual(L.periodRange('2026-11-10', '2026-11-09'), null);
+  assert.strictEqual(L.periodRange('2026-02-30', '2026-03-05'), null);
+  assert.strictEqual(L.periodRange('', '2026-03-05'), null);
+});
+const mkPeriodProgram = () => {
+  const at = (m, d, h) => new Date(2026, m, d, h || 12).getTime();
+  const s = (id, t, name, entries) => ({ id, dayId: 'd', dayName: name, completedAt: t, exercises: entries });
+  const ex = (id, name, group, reps, kg, n) => ({ exerciseId: id, name, group, sets: Array.from({ length: n || 2 }, () => ({ reps, kg, done: true })) });
+  return { sessions: [
+    s('a1', at(9, 10), 'Petto', [ex('p', 'Panca', 'Petto', 10, 40), ex('c', 'Curl', 'Bicipiti', 10, 10)]),
+    s('a2', at(9, 20), 'Gambe', [ex('q', 'Squat', 'Gambe', 8, 60)]),
+    s('b1', at(10, 5), 'Petto', [ex('p', 'Panca', 'Petto', 10, 50, 3), ex('c', 'Curl', 'Bicipiti', 10, 10)]),
+    s('b2', at(10, 12), 'Petto', [ex('p', 'Panca', 'Petto', 10, 55, 3)]),
+    s('b3', at(10, 19, 23), 'Gambe', [ex('q', 'Squat', 'Gambe', 8, 60)])] };
+};
+t('le statistiche di un periodo contano sessioni, serie, volume, giorni e frequenza', () => {
+  const r = L.periodRange('2026-11-01', '2026-11-28');
+  const st = L.periodStats(mkPeriodProgram(), r);
+  assert.deepStrictEqual([st.sessions, st.sets, st.volume, st.activeDays], [3, 10, 1700 + 1650 + 960, 3]);
+  assert.deepStrictEqual([st.avgVolume, st.perWeek, st.days], [1437, 0.8, 28]);
+  assert.deepStrictEqual(L.periodStats(mkPeriodProgram(), L.periodRange('2026-01-01', '2026-01-31')).sessions, 0);
+});
+t('il confronto tra due periodi mostra differenze, gruppi ed esercizi in comune', () => {
+  const prog = mkPeriodProgram();
+  const c = L.comparePeriods(prog, L.periodRange('2026-10-01', '2026-10-31'), L.periodRange('2026-11-01', '2026-11-30'));
+  assert.deepStrictEqual([c.a.sessions, c.b.sessions], [2, 3]);
+  assert.deepStrictEqual(c.deltas.sessions, { diff: 1, pct: 50 });
+  assert.strictEqual(c.deltas.volume.diff, 4310 - (800 + 200 + 960));
+  const petto = c.groups.find((g) => g.group === 'Petto');
+  assert.deepStrictEqual([petto.a, petto.b], [2, 6]);
+  assert.deepStrictEqual(c.groups.map((g) => g.group), ['Petto', 'Bicipiti', 'Gambe']);
+  assert.deepStrictEqual(c.exercises.map((e) => e.name), ['Panca', 'Curl', 'Squat']);
+  assert.deepStrictEqual([c.exercises[0].unit, c.exercises[0].pct, c.exercises[2].diff], ['kg', 38, 0]);
+  const vuoto = L.comparePeriods(prog, L.periodRange('2026-01-01', '2026-01-31'), L.periodRange('2026-11-01', '2026-11-30'));
+  assert.deepStrictEqual([vuoto.a.sessions, vuoto.deltas.sessions.pct, vuoto.exercises.length], [0, null, 0]);
+});
+t('la tabella delle serie elenca ogni serie completata e il riscaldamento solo se richiesto', () => {
+  const prog = { sessions: [
+    { id: 's1', completedAt: 100, exercises: [{ exerciseId: 'x', name: 'Panca', sets: [{ reps: 5, kg: 20, done: true, type: 'warmup' }, { reps: 8, kg: 50, done: true }, { reps: 7, kg: 50, done: false }] }] },
+    { id: 's2', completedAt: 200, exercises: [{ exerciseId: 'x', name: 'Panca', sets: [{ reps: 8, kg: 52.5, done: true }, { reps: 6, kg: 52.5, done: true, type: 'drop' }] }, { exerciseId: 'y', sets: [{ reps: 1, kg: 1, done: true }] }] },
+    { id: 's3', completedAt: 300, exercises: [{ exerciseId: 'x', name: 'Chest press', substitute: true, sets: [{ reps: 10, kg: 30, done: true }] }] }] };
+  const rows = L.exerciseSets(prog, 'x', false);
+  assert.deepStrictEqual(rows.map((r) => [r.t, r.n, r.kg, r.reps, r.volume, r.type]), [[100, 2, 50, 8, 400, 'normal'], [200, 1, 52.5, 8, 420, 'normal'], [200, 2, 52.5, 6, 315, 'drop']]);
+  assert.strictEqual(L.exerciseSets(prog, 'x', true).length, 4);
+});
+t('la tabella delle serie si ordina per ogni colonna, con ordine stabile a parità', () => {
+  const rows = [{ t: 100, n: 1, kg: 50, reps: 8, volume: 400 }, { t: 200, n: 1, kg: 52.5, reps: 8, volume: 420 }, { t: 200, n: 2, kg: 52.5, reps: 6, volume: 315 }, { t: 300, n: 1, kg: 50, reps: 10, volume: 500 }];
+  const ts = (key, dir) => L.sortSets(rows, key, dir).map((r) => r.t + '.' + r.n).join(' ');
+  assert.strictEqual(ts('t', 'desc'), '300.1 200.1 200.2 100.1');
+  assert.strictEqual(ts('t', 'asc'), '100.1 200.1 200.2 300.1');
+  assert.strictEqual(ts('kg', 'desc'), '200.1 200.2 300.1 100.1');
+  assert.strictEqual(ts('reps', 'asc'), '200.2 200.1 100.1 300.1');
+  assert.strictEqual(ts('volume', 'desc'), '300.1 200.1 100.1 200.2');
+  assert.strictEqual(ts('n', 'asc'), '300.1 200.1 100.1 200.2');
+  assert.strictEqual(ts('inventata', 'desc'), '300.1 200.1 200.2 100.1');
+  assert.strictEqual(rows[0].t, 100, 'non modifica l’elenco originale');
+});
+
 console.log('\n' + n + ' test Allenamenti superati');
