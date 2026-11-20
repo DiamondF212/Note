@@ -285,6 +285,18 @@
     rs.forEach((r) => r());
   });
 
+  // Android (Capacitor): senza il plugin App il gesto Indietro chiude l'app. Qui ogni gesto chiude un livello
+  // (pannello, giornata, sezione…) e solo dalla home esce dall'app.
+  function hookAndroidBack() {
+    let A = null;
+    try { const C = window.Capacitor; if (C && C.isNativePlatform && C.isNativePlatform()) A = (C.Plugins && C.Plugins.App) || null; } catch (e) { /* ignora */ }
+    if (!A || !A.addListener) return;
+    A.addListener('backButton', () => {
+      if (layers.length) back();
+      else if (A.exitApp) A.exitApp();
+    });
+  }
+
   function openSheet(title, content, opts) {
     opts = opts || {};
     const scrim = h('div', { class: 'scrim s2' });
@@ -1757,6 +1769,7 @@
 
     checkReminders();
     setInterval(checkReminders, 15000);
+    hookAndroidBack();
     window.__app = { S, N }; // utile per il debug
   }
 

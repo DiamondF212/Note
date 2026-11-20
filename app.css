@@ -1001,3 +1001,9 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 .workout-table-th.sorted { color: var(--accent); }
 .workout-table-row em { margin-left: 4px; font-style: normal; font-size: .62rem; color: var(--muted); }
 .workout-table-row.warm { color: var(--muted); }
+
+/* Ripetizioni o tempo: la freccia sta dentro il riquadro, il menu nativo si apre toccandola */
+.workout-unit-box { position: relative; }
+.workout-unit-box .field { padding-right: 30px; }
+.workout-unit-select { position: absolute; top: 0; right: 0; bottom: 0; width: 34px; opacity: 0; cursor: pointer; border: 0; font-size: 16px; }
+.workout-unit-arrow { position: absolute; right: 11px; top: 50%; width: 7px; height: 7px; margin-top: -6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); pointer-events: none; }

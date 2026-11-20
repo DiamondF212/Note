@@ -4,7 +4,7 @@
 
   const STORE_ID = 'program';
   const WEEKDAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
-  const MAX_SETS = 20, MAX_REPS = 100, MAX_KG = 1000;
+  const MAX_SETS = 20, MAX_REPS = 100, MAX_KG = 1000, MAX_TIME = 3600;
   const SET_TYPES = ['normal', 'warmup', 'drop'];
   const SET_TYPE_LABEL = { normal: 'Normale', warmup: 'Riscaldamento', drop: 'Drop set' };
   const SET_TYPE_SHORT = { warmup: 'risc.', drop: 'drop' };
@@ -32,16 +32,34 @@
     return Number.isFinite(n) && n >= 1 && n <= 10 ? Math.round(n * 2) / 2 : null;
   }
   // Ripetizioni e tipo di ogni serie: se l'esercizio non ha valori per serie vale il valore unico `reps`.
+  // Un esercizio può contare ripetizioni (predefinito) o tempo: con `unit: 'time'` i valori di `reps` (e di `setReps`)
+  // sono secondi, ad esempio per la dead hang o il plank. Il campo compare solo per gli esercizi a tempo.
+  function isTime(ex) { return !!ex && ex.unit === 'time'; }
+  function maxReps(ex) { return isTime(ex) ? MAX_TIME : MAX_REPS; }
+  function defaultReps(ex) { return isTime(ex) ? 30 : 10; }
+  // 45 → «45 s», 90 → «1 min 30 s».
+  function fmtTime(sec) {
+    const n = Math.max(0, Math.round(Number(sec) || 0));
+    if (n < 60) return n + ' s';
+    const m = Math.floor(n / 60), r = n % 60;
+    return m + ' min' + (r ? ' ' + r + ' s' : '');
+  }
+  // Versione stretta per le tabelle: 90 → «1:30».
+  function fmtClock(sec) {
+    const n = Math.max(0, Math.round(Number(sec) || 0));
+    return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+  }
+  function fmtReps(ex, n) { return isTime(ex) ? fmtTime(n) : String(n); }
   function repsFor(ex, i) {
     const own = ex && Array.isArray(ex.setReps) ? ex.setReps[i] : null;
-    return whole(own, whole(ex && ex.reps, 10, 1, MAX_REPS), 1, MAX_REPS);
+    return whole(own, whole(ex && ex.reps, defaultReps(ex), 1, maxReps(ex)), 1, maxReps(ex));
   }
   function typeFor(ex, i) { return cleanType(ex && Array.isArray(ex.setTypes) ? ex.setTypes[i] : null); }
   function repsList(ex) { return Array.from({ length: whole(ex && ex.setCount, 3, 1, MAX_SETS) }, (_, i) => repsFor(ex, i)); }
   // «3 × 10» se uguali, altrimenti «12 · 10 · 8».
   function repsSummary(ex) {
     const list = repsList(ex);
-    return list.every((r) => r === list[0]) ? list.length + ' × ' + list[0] : list.join(' · ');
+    return list.every((r) => r === list[0]) ? list.length + ' × ' + fmtReps(ex, list[0]) : list.map((r) => fmtReps(ex, r)).join(' · ');
   }
   function makeSet(ex, i) {
     const set = { reps: repsFor(ex, i), kg: ex.kg, done: false };
@@ -70,10 +88,12 @@
   }
   // I campi nuovi (ripetizioni per serie, tipi, nota) ci sono solo se servono: le schede vecchie restano identiche.
   function normalizeExercise(e) {
-    const setCount = whole(e.setCount, 3, 1, MAX_SETS), reps = whole(e.reps, 10, 1, MAX_REPS);
+    const time = e.unit === 'time', max = time ? MAX_TIME : MAX_REPS;
+    const setCount = whole(e.setCount, 3, 1, MAX_SETS), reps = whole(e.reps, time ? 30 : 10, 1, max);
     const out = { id: String(e.id), name: cleanName(e.name) || 'Esercizio', setCount, reps, kg: weight(e.kg, 0) };
+    if (time) out.unit = 'time';
     if (Array.isArray(e.setReps)) {
-      const list = Array.from({ length: setCount }, (_, i) => whole(e.setReps[i], reps, 1, MAX_REPS));
+      const list = Array.from({ length: setCount }, (_, i) => whole(e.setReps[i], reps, 1, max));
       if (!list.every((r) => r === list[0])) out.setReps = list;
       else out.reps = list[0];
     }
@@ -103,17 +123,20 @@
       exercises: (day.exercises || []).map((ex) => Object.assign({
         exerciseId: ex.id, name: ex.name,
         sets: Array.from({ length: whole(ex.setCount, 3, 1, MAX_SETS) }, (_, i) => makeSet(ex, i))
-      }, ex.group ? { group: ex.group } : {}))
+      }, ex.group ? { group: ex.group } : {}, isTime(ex) ? { unit: 'time' } : {}))
     };
   }
   function sessionStats(session) {
-    const sets = (session && session.exercises || []).flatMap((ex) => ex.sets || []);
+    const exs = (session && session.exercises) || [];
+    const sets = exs.flatMap((ex) => ex.sets || []);
     const done = sets.filter((s) => s.done);
+    // Negli esercizi a tempo i secondi non si moltiplicano per i kg: non fanno volume.
+    const lifted = exs.filter((ex) => !isTime(ex)).flatMap((ex) => ex.sets || []).filter((s) => s.done);
     return {
       totalSets: sets.length,
       completedSets: done.length,
       // Le serie di riscaldamento si contano tra quelle fatte ma non nel volume.
-      volume: done.filter((s) => s.type !== 'warmup').reduce((sum, s) => sum + (Number(s.reps) || 0) * (Number(s.kg) || 0), 0)
+      volume: lifted.filter((s) => s.type !== 'warmup').reduce((sum, s) => sum + (Number(s.reps) || 0) * (Number(s.kg) || 0), 0)
     };
   }
   function recentCount(sessions, now, days) {
@@ -606,6 +629,7 @@
   function exerciseSummary(ex) {
     const list = repsList(ex);
     const same = list.every((r) => r === list[0]);
+    if (isTime(ex)) return ex.setCount + ' serie · ' + (same ? fmtTime(list[0]) : list.map(fmtTime).join(' / ')) + (Number(ex.kg) > 0 ? ' · ' + fmtKg(ex.kg) + ' kg' : '');
     return ex.setCount + ' serie · ' + (same ? list[0] : list.join('/')) + ' rip · ' + fmtKg(ex.kg) + ' kg';
   }
   function renderExercise(day, ex, active) {
@@ -628,15 +652,15 @@
       card.append(ctx.h('div', { class: 'workout-target-row' },
         ctx.h('span', null, 'Obiettivo'),
         ctx.h('strong', null, repsSummary(ex)),
-        ctx.h('b', null, fmtKg(ex.kg) + ' kg')
+        isTime(ex) && !(Number(ex.kg) > 0) ? null : ctx.h('b', null, fmtKg(ex.kg) + ' kg')
       ));
       return card;
     }
     card.append(ctx.h('div', { class: 'workout-set-head' },
-      ctx.h('span', null, 'SERIE'), ctx.h('span', null, 'RIP'), ctx.h('span', null, 'KG'), ctx.h('span', null, 'RPE'), ctx.h('span', { class: 'workout-done-head' }, 'OK')
+      ctx.h('span', null, 'SERIE'), ctx.h('span', null, isTime(current) ? 'SEC' : 'RIP'), ctx.h('span', null, 'KG'), ctx.h('span', null, 'RPE'), ctx.h('span', { class: 'workout-done-head' }, 'OK')
     ));
     const work = current.sets.find((s) => cleanType(s.type) === 'normal');
-    if (work && !current.sets.some((s) => s.type === 'warmup') && warmupPlan(work.kg, work.reps).length) {
+    if (work && !isTime(current) && !current.sets.some((s) => s.type === 'warmup') && warmupPlan(work.kg, work.reps).length) {
       card.append(ctx.h('button', { class: 'workout-warmup-btn', type: 'button', 'data-workout-warmup': '1', onclick: () => addWarmup(current, work) },
         ctx.h('span', { html: ctx.I('dumbbell', 15) }), 'Riscaldamento suggerito · ' + warmupPlan(work.kg, work.reps).length + ' serie'));
     }
@@ -646,8 +670,8 @@
       paintBadge(badge, index, set);
       badge.addEventListener('click', () => cycleSetType(day, current, index, badge));
       row.append(badge);
-      const reps = ctx.h('input', { class: 'workout-number', type: 'number', min: '1', max: String(MAX_REPS), step: '1', inputmode: 'numeric', value: set.reps, 'aria-label': 'Ripetizioni serie ' + (index + 1), 'data-set-reps': '1' });
-      reps.addEventListener('change', () => updateSet(day, current, index, 'reps', whole(reps.value, set.reps, 1, MAX_REPS)));
+      const reps = ctx.h('input', { class: 'workout-number', type: 'number', min: '1', max: String(maxReps(current)), step: '1', inputmode: 'numeric', value: set.reps, 'aria-label': (isTime(current) ? 'Secondi serie ' : 'Ripetizioni serie ') + (index + 1), 'data-set-reps': '1' });
+      reps.addEventListener('change', () => updateSet(day, current, index, 'reps', whole(reps.value, set.reps, 1, maxReps(current))));
       const kg = ctx.h('input', { class: 'workout-number', type: 'number', min: '0', max: String(MAX_KG), step: '0.5', inputmode: 'decimal', value: set.kg, 'aria-label': 'Carico in kg serie ' + (index + 1), 'data-set-kg': '1' });
       kg.addEventListener('change', () => updateSet(day, current, index, 'kg', weight(kg.value, set.kg)));
       const rpe = ctx.h('input', { class: 'workout-number workout-rpe', type: 'number', min: '1', max: '10', step: '0.5', inputmode: 'decimal', placeholder: '–', value: set.rpe == null ? '' : set.rpe, 'aria-label': 'RPE serie ' + (index + 1), 'data-set-rpe': '1' });
@@ -760,9 +784,11 @@
     });
     body.append(list);
   }
-  function setText(set) {
+  function setText(set, ex) {
     const prefix = set.type === 'warmup' ? 'Risc. ' : set.type === 'drop' ? 'Drop ' : '';
-    return prefix + set.reps + ' × ' + fmtKg(set.kg) + ' kg' + (set.rpe != null ? ' · RPE ' + fmtNum(set.rpe) : '');
+    const rpe = set.rpe != null ? ' · RPE ' + fmtNum(set.rpe) : '';
+    if (isTime(ex)) return prefix + fmtTime(set.reps) + (Number(set.kg) > 0 ? ' con ' + fmtKg(set.kg) + ' kg' : '') + rpe;
+    return prefix + set.reps + ' × ' + fmtKg(set.kg) + ' kg' + rpe;
   }
   function showSession(session) {
     const body = ctx.h('div', { class: 'workout-session-details' });
@@ -772,7 +798,7 @@
       const done = (ex.sets || []).filter((s) => s.done);
       if (!done.length && !ex.note) return;
       const box = ctx.h('div', { class: 'workout-history-exercise' }, ctx.h('strong', null, ex.name));
-      if (done.length) box.append(ctx.h('small', null, done.map(setText).join('  ·  ')));
+      if (done.length) box.append(ctx.h('small', null, done.map((x) => setText(x, ex)).join('  ·  ')));
       if (ex.note) box.append(ctx.h('small', { class: 'workout-history-note' }, ex.note));
       body.append(box);
     });
@@ -836,11 +862,21 @@
     // Ripetizioni e tipo di ogni serie: le liste non si accorciano mentre si scrive, così cambiare il numero di serie non fa perdere i valori.
     const repsAll = [], typesAll = [];
     const startCount = existing ? existing.setCount : 3;
-    for (let i = 0; i < startCount; i++) { repsAll.push(existing ? repsFor(existing, i) : 10); typesAll.push(existing ? typeFor(existing, i) : 'normal'); }
+    // Ripetizioni o tempo: si sceglie con la freccia nel riquadro «Rip. di tutte» (nel modo tempo i valori sono secondi).
+    let unit = isTime(existing) ? 'time' : 'reps';
+    const unitMax = () => (unit === 'time' ? MAX_TIME : MAX_REPS);
+    const unitDefault = () => (unit === 'time' ? 30 : 10);
+    for (let i = 0; i < startCount; i++) { repsAll.push(existing ? repsFor(existing, i) : unitDefault()); typesAll.push(existing ? typeFor(existing, i) : 'normal'); }
     function ensure(count, fill) { while (repsAll.length < count) { repsAll.push(fill); typesAll.push('normal'); } }
     const name = ctx.h('input', { class: 'field', maxlength: '60', placeholder: 'es. Panca piana', value: existing ? existing.name : '', 'data-workout-exercise-name': '1', autocomplete: 'off' });
     const sets = ctx.h('input', { class: 'field', type: 'number', min: '1', max: String(MAX_SETS), step: '1', inputmode: 'numeric', value: startCount, 'data-workout-exercise-sets': '1' });
-    const reps = ctx.h('input', { class: 'field', type: 'number', min: '1', max: String(MAX_REPS), step: '1', inputmode: 'numeric', value: existing ? repsAll[0] : 10, 'data-workout-exercise-reps': '1' });
+    const reps = ctx.h('input', { class: 'field', type: 'number', min: '1', max: String(unitMax()), step: '1', inputmode: 'numeric', value: existing ? repsAll[0] : unitDefault(), 'data-workout-exercise-reps': '1' });
+    const unitSelect = ctx.h('select', { class: 'workout-unit-select', 'aria-label': 'Ripetizioni o tempo', 'data-workout-exercise-unit': '1' },
+      ctx.h('option', { value: 'reps' }, 'Ripetizioni'), ctx.h('option', { value: 'time' }, 'Tempo (secondi)'));
+    unitSelect.value = unit;
+    const unitBox = ctx.h('div', { class: 'workout-unit-box' }, reps, unitSelect, ctx.h('span', { class: 'workout-unit-arrow', 'aria-hidden': 'true' }));
+    const repsCaption = ctx.h('span', { 'data-unit-caption': '1' }, unit === 'time' ? 'Sec. di tutte' : 'Rip. di tutte');
+    const perSetTitle = ctx.h('strong', null, unit === 'time' ? 'Tempo per serie (secondi)' : 'Ripetizioni per serie');
     const kg = ctx.h('input', { class: 'field', type: 'number', min: '0', max: String(MAX_KG), step: '0.5', inputmode: 'decimal', value: existing ? existing.kg : 0, 'data-workout-exercise-kg': '1' });
     const group = ctx.h('select', { class: 'field', 'data-workout-exercise-group': '1' },
       ctx.h('option', { value: '' }, 'Nessun gruppo'),
@@ -852,11 +888,11 @@
     const currentCount = () => whole(sets.value, repsAll.length, 1, MAX_SETS);
     function drawPerSet() {
       const count = currentCount();
-      ensure(count, whole(reps.value, 10, 1, MAX_REPS));
+      ensure(count, whole(reps.value, unitDefault(), 1, unitMax()));
       perSet.replaceChildren();
       for (let i = 0; i < count; i++) {
-        const input = ctx.h('input', { class: 'workout-number', type: 'number', min: '1', max: String(MAX_REPS), step: '1', inputmode: 'numeric', value: repsAll[i], 'aria-label': 'Ripetizioni serie ' + (i + 1), 'data-perset-reps': String(i) });
-        input.addEventListener('input', () => { const n = whole(input.value, null, 1, MAX_REPS); if (n != null) repsAll[i] = n; });
+        const input = ctx.h('input', { class: 'workout-number', type: 'number', min: '1', max: String(unitMax()), step: '1', inputmode: 'numeric', value: repsAll[i], 'aria-label': (unit === 'time' ? 'Secondi serie ' : 'Ripetizioni serie ') + (i + 1), 'data-perset-reps': String(i) });
+        input.addEventListener('input', () => { const n = whole(input.value, null, 1, unitMax()); if (n != null) repsAll[i] = n; });
         const type = ctx.h('select', { class: 'workout-type-select', 'aria-label': 'Tipo della serie ' + (i + 1), 'data-perset-type': String(i) },
           ...SET_TYPES.map((t) => ctx.h('option', { value: t }, SET_TYPE_LABEL[t])));
         type.value = typesAll[i];
@@ -865,8 +901,17 @@
       }
     }
     sets.addEventListener('input', drawPerSet);
+    unitSelect.addEventListener('change', () => {
+      unit = unitSelect.value === 'time' ? 'time' : 'reps';
+      for (let i = 0; i < repsAll.length; i++) repsAll[i] = unitDefault();
+      reps.value = unitDefault();
+      reps.max = String(unitMax());
+      repsCaption.textContent = unit === 'time' ? 'Sec. di tutte' : 'Rip. di tutte';
+      perSetTitle.textContent = unit === 'time' ? 'Tempo per serie (secondi)' : 'Ripetizioni per serie';
+      drawPerSet();
+    });
     reps.addEventListener('input', () => {
-      const n = whole(reps.value, null, 1, MAX_REPS);
+      const n = whole(reps.value, null, 1, unitMax());
       if (n == null) return;
       for (let i = 0; i < repsAll.length; i++) repsAll[i] = n;
       drawPerSet();
@@ -877,10 +922,10 @@
       ctx.h('label', null, 'Nome esercizio', name),
       ctx.h('div', { class: 'workout-form-grid' },
         ctx.h('label', null, 'Serie', sets),
-        ctx.h('label', null, 'Rip. di tutte', reps),
+        ctx.h('label', null, repsCaption, unitBox),
         ctx.h('label', null, 'Kg', kg)
       ),
-      ctx.h('div', { class: 'workout-perset-head' }, ctx.h('strong', null, 'Ripetizioni per serie'), ctx.h('small', null, 'Cambia le singole serie, ad esempio 12 · 10 · 8, o segnale come riscaldamento o drop set.')),
+      ctx.h('div', { class: 'workout-perset-head' }, perSetTitle, ctx.h('small', null, 'Cambia le singole serie, ad esempio 12 · 10 · 8, o segnale come riscaldamento o drop set.')),
       perSet,
       ctx.h('label', null, 'Gruppo muscolare', group),
       ctx.h('label', null, 'Nota fissa (facoltativa)', note),
@@ -899,10 +944,12 @@
       const loadKg = weight(kg.value, null);
       if (!clean) { error.textContent = 'Inserisci il nome dell’esercizio.'; name.focus(); return; }
       if (count == null || loadKg == null) { error.textContent = 'Serie o carico non validi.'; return; }
-      ensure(count, whole(reps.value, 10, 1, MAX_REPS));
+      ensure(count, whole(reps.value, unitDefault(), 1, unitMax()));
       const list = repsAll.slice(0, count), types = typesAll.slice(0, count);
       const ex = existing || { id: ctx.uid() };
+      const unitChanged = !!existing && isTime(existing) !== (unit === 'time');
       ex.name = clean; ex.setCount = count; ex.kg = loadKg; ex.reps = list[0];
+      if (unit === 'time') ex.unit = 'time'; else delete ex.unit;
       if (list.every((r) => r === list[0])) delete ex.setReps; else ex.setReps = list;
       if (types.every((t) => t === 'normal')) delete ex.setTypes; else ex.setTypes = types;
       const text = cleanNote(note.value, MAX_EX_NOTE);
@@ -911,10 +958,15 @@
       if (chosenGroup) ex.group = chosenGroup; else delete ex.group;
       const active = day.activeSession && day.activeSession.exercises.find((e) => e.exerciseId === ex.id);
       if (existing) {
-        if (active) { active.name = clean; active.sets = Array.from({ length: count }, (_, i) => active.sets[i] || makeSet(ex, i)); }
+        if (active) {
+          active.name = clean;
+          if (unit === 'time') active.unit = 'time'; else delete active.unit;
+          // Cambiando tra ripetizioni e tempo le serie già scritte non sono più confrontabili: ripartono dai valori nuovi.
+          active.sets = Array.from({ length: count }, (_, i) => (!unitChanged && active.sets[i]) || makeSet(ex, i));
+        }
       } else {
         day.exercises.push(ex);
-        if (day.activeSession) day.activeSession.exercises.push({ exerciseId: ex.id, name: ex.name, sets: Array.from({ length: count }, (_, i) => makeSet(ex, i)) });
+        if (day.activeSession) day.activeSession.exercises.push(Object.assign({ exerciseId: ex.id, name: ex.name, sets: Array.from({ length: count }, (_, i) => makeSet(ex, i)) }, isTime(ex) ? { unit: 'time' } : {}));
       }
       if (day.activeSession) {
         const running = day.activeSession.exercises.find((e) => e.exerciseId === ex.id);
@@ -925,13 +977,16 @@
     }
   }
   /* ---------- Progressione automatica ---------- */
-  function repsLabel(list) { return list.every((r) => r === list[0]) ? list.length + ' × ' + list[0] : list.join(' · '); }
+  function repsLabel(list, unit) {
+    const f = (r) => (unit === 'time' ? fmtTime(r) : r);
+    return list.every((r) => r === list[0]) ? list.length + ' × ' + f(list[0]) : list.map(f).join(' · ');
+  }
   function progressionBanner(day, ex, current, sug) {
-    const title = sug.mode === 'weight' ? 'Aumenta il peso' : 'Aumenta le ripetizioni';
+    const title = sug.mode === 'weight' ? 'Aumenta il peso' : sug.unit === 'time' ? 'Aumenta il tempo' : 'Aumenta le ripetizioni';
     const repsChanged = sug.setReps.some((r, i) => r !== sug.fromReps[i]);
     const detail = sug.mode === 'weight'
-      ? fmtKg(sug.fromKg) + ' → ' + fmtKg(sug.kg) + ' kg' + (repsChanged ? ' · ' + repsLabel(sug.setReps) : '')
-      : repsLabel(sug.fromReps) + ' → ' + repsLabel(sug.setReps);
+      ? fmtKg(sug.fromKg) + ' → ' + fmtKg(sug.kg) + ' kg' + (repsChanged ? ' · ' + repsLabel(sug.setReps, sug.unit) : '')
+      : repsLabel(sug.fromReps, sug.unit) + ' → ' + repsLabel(sug.setReps, sug.unit);
     return ctx.h('div', { class: 'workout-progress-card', 'data-workout-progression': sug.mode },
       ctx.h('span', { class: 'workout-progress-icon', html: ctx.I('spark', 18) }),
       ctx.h('div', { class: 'workout-progress-copy' },
@@ -952,7 +1007,7 @@
     button.classList.add('is-applied');
     await new Promise((r) => setTimeout(r, 420));
     render();
-    ctx.toast('Obiettivo aggiornato: ' + fmtKg(ex.kg) + ' kg · ' + repsSummary(ex), 5200, {
+    ctx.toast('Obiettivo aggiornato: ' + (isTime(ex) && !(Number(ex.kg) > 0) ? '' : fmtKg(ex.kg) + ' kg · ') + repsSummary(ex), 5200, {
       label: 'Annulla',
       fn: async () => {
         Object.keys(ex).forEach((k) => { delete ex[k]; });
@@ -1116,7 +1171,7 @@
         parts.push(m.best
           ? ctx.h('div', { class: 'workout-month-best', 'data-month-best': '1' },
               ctx.h('strong', null, m.best.name),
-              ctx.h('span', null, fmtKg(m.best.from) + ' → ' + fmtKg(m.best.to) + (m.best.unit === 'kg' ? ' kg di massimale stimato' : ' ripetizioni') + ' (+' + m.best.pct + '%)'))
+              ctx.h('span', null, fmtKg(m.best.from) + ' → ' + fmtKg(m.best.to) + (m.best.unit === 'kg' ? ' kg di massimale stimato' : m.best.unit === 'sec' ? ' secondi' : ' ripetizioni') + ' (+' + m.best.pct + '%)'))
           : ctx.h('p', { class: 'hint', 'data-month-best-empty': '1' }, 'Nessun miglioramento ancora: serve almeno un esercizio fatto più volte.'));
       }
       box.replaceChildren(...parts);
@@ -1248,7 +1303,7 @@
       if (c.exercises.length) {
         parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Esercizi in comune'));
         c.exercises.slice(0, 8).forEach((e) => parts.push(ctx.h('div', { class: 'workout-compare-row', 'data-period-exercise': e.name },
-          ctx.h('span', null, e.name + ' · ' + shown(e.from) + ' → ' + shown(e.to) + (e.unit === 'kg' ? ' kg' : ' rip')),
+          ctx.h('span', null, e.name + ' · ' + shown(e.from) + ' → ' + shown(e.to) + (e.unit === 'kg' ? ' kg' : e.unit === 'sec' ? ' s' : ' rip')),
           ctx.h('b', { class: tone(e) }, change(e)))));
         parts.push(ctx.h('p', { class: 'hint' }, 'Per i kg si usa il massimale stimato; a corpo libero, le ripetizioni.'));
       } else if (c.a.sessions && c.b.sessions) {
@@ -1603,14 +1658,16 @@
     function chartNodes() {
       if (!history.length) return [ctx.h('p', { class: 'hint' }, 'Ancora nessun dato. Completa almeno una serie in una sessione per vedere i progressi.')];
       const last = history[history.length - 1];
-      const nodes = [ctx.h('p', { class: 'hint' }, history.length + (history.length === 1 ? ' sessione registrata' : ' sessioni registrate') + ' · ultimo: ' + fmtKg(last.kg) + ' kg × ' + last.reps)];
+      const time = isTime(ex);
+      const lastText = time ? fmtTime(last.reps) + (last.kg > 0 ? ' con ' + fmtKg(last.kg) + ' kg' : '') : fmtKg(last.kg) + ' kg × ' + last.reps;
+      const nodes = [ctx.h('p', { class: 'hint' }, history.length + (history.length === 1 ? ' sessione registrata' : ' sessioni registrate') + ' · ultimo: ' + lastText)];
       if (history.length === 1) nodes.push(ctx.h('p', { class: 'hint' }, 'Completa un’altra sessione per vedere l’andamento nel tempo.'));
-      nodes.push(ctx.h('h4', { class: 'wk-chart-title' }, 'Carico massimo (kg)'),
+      if (!time || history.some((p) => p.kg > 0)) nodes.push(ctx.h('h4', { class: 'wk-chart-title' }, 'Carico massimo (kg)'),
         ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(history, 'kg', 'Carico massimo in kg di ' + ex.name) }));
-      nodes.push(ctx.h('h4', { class: 'wk-chart-title' }, 'Ripetizioni'),
-        ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(history, 'reps', 'Ripetizioni di ' + ex.name) }));
-      nodes.push(ctx.h('p', { class: 'hint' }, 'Per ogni sessione viene mostrata la serie più pesante completata.'));
-      const best = bestOneRm(history);
+      nodes.push(ctx.h('h4', { class: 'wk-chart-title' }, time ? 'Tempo (secondi)' : 'Ripetizioni'),
+        ctx.h('div', { class: 'wk-chart-wrap', html: lineChartSvg(history, 'reps', (time ? 'Tempo in secondi di ' : 'Ripetizioni di ') + ex.name) }));
+      nodes.push(ctx.h('p', { class: 'hint' }, time ? 'Per ogni sessione viene mostrata la serie più lunga completata.' : 'Per ogni sessione viene mostrata la serie più pesante completata.'));
+      const best = time ? null : bestOneRm(history);
       if (best) {
         nodes.push(ctx.h('div', { class: 'workout-orm', 'data-workout-orm': '1' },
           ctx.h('span', null, 'Massimale stimato'),
@@ -1627,7 +1684,8 @@
         onclick: () => { table.warm = !table.warm; draw(); }
       }, 'Con riscaldamento'))];
       if (!rows.length) { nodes.push(ctx.h('p', { class: 'hint', 'data-table-empty': '1' }, 'Nessuna serie completata per questo esercizio.')); return nodes; }
-      const cols = [['t', 'Data'], ['n', 'Serie'], ['kg', 'Kg'], ['reps', 'Rip.'], ['volume', 'Volume']];
+      const timed = isTime(ex);
+      const cols = [['t', 'Data'], ['n', 'Serie'], ['kg', 'Kg'], ['reps', timed ? 'Tempo' : 'Rip.'], ['volume', 'Volume']];
       const list = ctx.h('div', { class: 'workout-table', role: 'table', 'data-workout-table': '1' },
         ctx.h('div', { class: 'workout-table-row head', role: 'row' }, ...cols.map(([k, label]) => ctx.h('button', {
           class: 'workout-table-th' + (table.key === k ? ' sorted' : ''), type: 'button', role: 'columnheader', 'data-table-sort': k,
@@ -1637,7 +1695,7 @@
       rows.forEach((r) => list.append(ctx.h('div', { class: 'workout-table-row' + (r.type === 'warmup' ? ' warm' : ''), role: 'row', 'data-table-row': '1' },
         ctx.h('span', null, compactDate(r.t)),
         ctx.h('span', null, String(r.n), r.type !== 'normal' ? ctx.h('em', null, SET_TYPE_SHORT[r.type]) : null),
-        ctx.h('span', null, fmtKg(r.kg)), ctx.h('span', null, String(r.reps)), ctx.h('span', null, fmtKg(r.volume)))));
+        ctx.h('span', null, fmtKg(r.kg)), ctx.h('span', null, timed ? fmtClock(r.reps) : String(r.reps)), ctx.h('span', null, timed ? '–' : fmtKg(r.volume)))));
       nodes.push(list);
       const top = Math.max.apply(null, rows.filter((r) => r.type !== 'warmup').map((r) => r.kg).concat([0]));
       nodes.push(ctx.h('p', { class: 'hint', 'data-table-summary': '1' }, rows.length + (rows.length === 1 ? ' serie completata' : ' serie completate') + (top > 0 ? ' · carico massimo ' + fmtKg(top) + ' kg' : '') + '. Tocca un’intestazione per ordinare.'));
@@ -1738,7 +1796,7 @@
           if (!set || !set.done || set.type === 'warmup') return;
           const row = totals.get(group) || { group, sets: 0, volume: 0 };
           row.sets += 1;
-          row.volume += (Number(set.reps) || 0) * (Number(set.kg) || 0);
+          if (!isTime(ex)) row.volume += (Number(set.reps) || 0) * (Number(set.kg) || 0);
           totals.set(group, row);
         });
       });
@@ -1795,6 +1853,7 @@
       const before = (prev.exercises || []).find((e) => e.exerciseId === ex.exerciseId && !e.substitute);
       const now = topKg(ex), was = before ? topKg(before) : null;
       if (now == null || was == null) return;
+      if (isTime(ex) && !(now > 0 || was > 0)) return;
       exercises.push({ name: ex.name, kg: now, prevKg: was, delta: Math.round((now - was) * 10) / 10 });
     });
     return { volume: b.volume, prevVolume: a.volume, delta, pct: a.volume > 0 ? Math.round((delta / a.volume) * 100) : null, exercises };
@@ -1816,7 +1875,7 @@
 
 
   /* ---------- Progressione automatica ---------- */
-  const PROG_SESSIONS = 2, PROG_REP_CAP = 12, PROG_LOW_REPS = 6, PROG_BODY_CAP = 30, PROG_RESET_MIN = 8;
+  const PROG_SESSIONS = 2, PROG_REP_CAP = 12, PROG_LOW_REPS = 6, PROG_BODY_CAP = 30, PROG_RESET_MIN = 8, PROG_TIME_STEP = 5, PROG_TIME_CAP = 300;
   function kgStep(kg) { return kg >= 20 ? 2.5 : 1; }
   // Posizioni delle serie «normali» (riscaldamento, cedimento e simili non contano per la progressione).
   function normalIndexes(ex) {
@@ -1827,7 +1886,7 @@
   // La sessione raggiunge l'obiettivo se ogni serie normale è fatta, con almeno le ripetizioni e il carico previsti, e senza RPE oltre 9.
   function sessionMeetsTarget(entry, ex) {
     const idx = normalIndexes(ex);
-    if (!entry || !idx.length) return false;
+    if (!entry || !idx.length || isTime(entry) !== isTime(ex)) return false;
     const sets = (entry.sets || []).filter((x) => x && cleanType(x.type) === 'normal');
     if (sets.length < idx.length) return false;
     return idx.every((planned, j) => {
@@ -1843,6 +1902,12 @@
     const reps = repsList(ex), kg = Number(ex.kg) || 0;
     const normal = idx.map((i) => reps[i]);
     const next = reps.slice();
+    if (isTime(ex)) {
+      // A tempo: si aggiungono PROG_TIME_STEP secondi a ogni serie normale, fino a PROG_TIME_CAP.
+      if (Math.min(...normal) >= PROG_TIME_CAP) return null;
+      idx.forEach((i) => { next[i] = Math.min(PROG_TIME_CAP, reps[i] + PROG_TIME_STEP); });
+      return { mode: 'reps', unit: 'time', kg, setReps: next, fromKg: kg, fromReps: reps };
+    }
     let mode, nextKg = kg;
     const heavier = () => Math.min(MAX_KG, Math.round((kg + kgStep(kg)) * 10) / 10);
     if (kg <= 0) {
@@ -2021,8 +2086,10 @@
   }
   // Nuovo esercizio con le stesse serie e ripetizioni; la nota fissa riguardava quello vecchio e non si porta dietro.
   function makeSubstitute(ex, pick, id) {
-    const out = { id, name: pick.name, group: pick.group, setCount: ex.setCount, reps: ex.reps, kg: substituteKg(ex.kg, equipmentOf(ex), pick.equipment) };
-    if (ex.setReps) out.setReps = ex.setReps.slice();
+    // I secondi di un esercizio a tempo non hanno senso come ripetizioni: la sostituzione riparte da 10.
+    const time = isTime(ex);
+    const out = { id, name: pick.name, group: pick.group, setCount: ex.setCount, reps: time ? 10 : ex.reps, kg: substituteKg(ex.kg, equipmentOf(ex), pick.equipment) };
+    if (ex.setReps && !time) out.setReps = ex.setReps.slice();
     if (ex.setTypes) out.setTypes = ex.setTypes.slice();
     return normalizeExercise(out);
   }
@@ -2047,8 +2114,9 @@
     return out;
   }
   // Valore di una serie per misurare il progresso: massimale stimato, o ripetizioni se a corpo libero.
-  function progressMetric(x) {
+  function progressMetric(x, ex) {
     const kg = Number(x.kg) || 0, reps = Number(x.reps) || 0;
+    if (isTime(ex)) return { value: reps, unit: 'sec' };
     if (kg > 0) return { value: estimateOneRm(kg, reps) || kg, unit: 'kg' };
     return { value: reps, unit: 'rip' };
   }
@@ -2059,7 +2127,7 @@
       if (ex.substitute) return;
       const done = (ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup');
       if (!done.length) return;
-      const top = done.map(progressMetric).reduce((a, b) => (b.value > a.value ? b : a));
+      const top = done.map((x) => progressMetric(x, ex)).reduce((a, b) => (b.value > a.value ? b : a));
       if (!(top.value > 0)) return;
       const list = byEx.get(ex.exerciseId) || [];
       list.push({ t: sessionTime(sess), value: top.value, unit: top.unit, name: ex.name });
@@ -2192,7 +2260,7 @@
         if (ex.substitute) return;
         const done = (ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup');
         if (!done.length) return;
-        const top = done.map(progressMetric).reduce((a, b) => (b.value > a.value ? b : a));
+        const top = done.map((x) => progressMetric(x, ex)).reduce((a, b) => (b.value > a.value ? b : a));
         if (!(top.value > 0)) return;
         if (!out[ex.exerciseId] || top.value > out[ex.exerciseId].value) out[ex.exerciseId] = { name: ex.name, value: top.value, unit: top.unit };
       });
@@ -2250,7 +2318,7 @@
         const type = cleanType(x.type);
         if (type === 'warmup' && !includeWarmup) return;
         const kg = Number(x.kg) || 0, reps = Number(x.reps) || 0;
-        rows.push({ t, sessionId: sess.id, n: i + 1, type, kg, reps, volume: Math.round(kg * reps * 10) / 10 });
+        rows.push({ t, sessionId: sess.id, n: i + 1, type, kg, reps, volume: isTime(ex) ? 0 : Math.round(kg * reps * 10) / 10 });
       });
     });
     return rows;
@@ -2262,7 +2330,7 @@
     return rows.slice().sort((a, b) => (a[k] - b[k]) * sign || b.t - a.t || a.n - b.n);
   }
 
-  const _logic = { mobilityPlan, mobilityDone, toggleMobility, setAllMobility, mobilityProgress, mobilityField, MOBILITY, parseDayKey, periodRange, periodStats, comparePeriods, bestByExercise, exerciseSets, sortSets, progressionSuggestion, nextTarget, applyTarget, retargetSession, sessionMeetsTarget, findCatalog, substituteSuggestions, substituteKg, makeSubstitute, weeklyVolumeSeries, monthlySummary, bestProgress, groupVolumeBetween, CATALOG, cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet,
+  const _logic = { mobilityPlan, mobilityDone, toggleMobility, setAllMobility, mobilityProgress, mobilityField, MOBILITY, parseDayKey, periodRange, periodStats, comparePeriods, bestByExercise, exerciseSets, sortSets, progressionSuggestion, nextTarget, applyTarget, retargetSession, sessionMeetsTarget, findCatalog, substituteSuggestions, substituteKg, makeSubstitute, weeklyVolumeSeries, monthlySummary, bestProgress, groupVolumeBetween, CATALOG, cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet, isTime, fmtTime, fmtClock,
     dayKey, startOfWeek, weekStreak, weekDots, monthGrid, bodyWeight, upsertBodyWeight, dateInputToTime, reminderPlan, parseTime, SET_TYPES, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.workouts;

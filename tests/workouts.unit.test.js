@@ -523,4 +523,63 @@ t('la tabella delle serie si ordina per ogni colonna, con ordine stabile a parit
   assert.strictEqual(rows[0].t, 100, 'non modifica l’elenco originale');
 });
 
+/* ---------- esercizi a tempo (dead hang, plank…) ---------- */
+t('un esercizio a tempo conserva l’unità e i secondi, e quelli a ripetizioni restano identici', () => {
+  const a = L.normalizeProgram({ days: [{ id: 'd', name: 'G', exercises: [
+    { id: 'h', name: 'Dead hang', setCount: 3, reps: 45, kg: 0, unit: 'time' },
+    { id: 'p', name: 'Panca', setCount: 3, reps: 8, kg: 50 },
+    { id: 'x', name: 'Altro', setCount: 3, reps: 8, kg: 0, unit: 'boh' }] }] }).days[0].exercises;
+  assert.strictEqual(a[0].unit, 'time'); assert.strictEqual(a[0].reps, 45);
+  assert.ok(!('unit' in a[1]) && !('unit' in a[2]), 'il campo compare solo se serve');
+});
+t('il tempo arriva a 3600 secondi, le ripetizioni a 100', () => {
+  const time = L.normalizeProgram({ days: [{ id: 'd', name: 'G', exercises: [{ id: 'h', name: 'Plank', setCount: 2, reps: 3600, unit: 'time', setReps: [3600, 120] }] }] }).days[0].exercises[0];
+  assert.deepStrictEqual(L.repsFor(time, 0), 3600); assert.strictEqual(L.repsFor(time, 1), 120);
+  const reps = L.normalizeProgram({ days: [{ id: 'd', name: 'G', exercises: [{ id: 'h', name: 'X', setCount: 1, reps: 3600 }] }] }).days[0].exercises[0];
+  assert.strictEqual(reps.reps, 10, 'oltre 100 ripetizioni si torna al valore predefinito');
+});
+t('formati del tempo: 45 s, 1 min 30 s, 1:30', () => {
+  assert.strictEqual(L.fmtTime(45), '45 s'); assert.strictEqual(L.fmtTime(90), '1 min 30 s'); assert.strictEqual(L.fmtTime(120), '2 min');
+  assert.strictEqual(L.fmtClock(90), '1:30'); assert.strictEqual(L.fmtClock(45), '0:45');
+});
+t('la sessione di un esercizio a tempo porta l’unità, il riepilogo mostra i secondi e non fa volume', () => {
+  const day = { id: 'd', name: 'G', exercises: [
+    { id: 'h', name: 'Dead hang', setCount: 3, reps: 40, kg: 10, unit: 'time', setReps: [40, 35, 30] },
+    { id: 'p', name: 'Panca', setCount: 1, reps: 10, kg: 50 }] };
+  assert.strictEqual(L.repsSummary(day.exercises[0]), '40 s · 35 s · 30 s');
+  const s = L.makeSession(day, 's1', 1000);
+  assert.strictEqual(s.exercises[0].unit, 'time'); assert.ok(!('unit' in s.exercises[1]));
+  assert.deepStrictEqual(s.exercises[0].sets.map((x) => x.reps), [40, 35, 30]);
+  s.exercises.forEach((e) => e.sets.forEach((x) => { x.done = true; }));
+  assert.strictEqual(L.sessionStats(s).volume, 500, 'solo la panca: 10 × 50');
+});
+t('tabella e progressi di un esercizio a tempo: niente volume e niente massimale', () => {
+  const prog = { days: [], sessions: [{ id: 's', dayId: 'd', completedAt: 100, exercises: [{ exerciseId: 'h', name: 'Dead hang', unit: 'time', sets: [{ reps: 40, kg: 0, done: true }, { reps: 55, kg: 0, done: true }] }] }] };
+  const rows = L.exerciseSets(prog, 'h', false);
+  assert.deepStrictEqual(rows.map((r) => r.volume), [0, 0]);
+  assert.strictEqual(L.exerciseHistory(prog, 'h')[0].reps, 55, 'vince la serie più lunga');
+  const best = L.bestByExercise(prog.sessions, 0, 1000).h;
+  assert.strictEqual(best.unit, 'sec'); assert.strictEqual(best.value, 55);
+  assert.strictEqual(L.groupVolumeBetween(prog.sessions, 0, 1000)[0].volume, 0);
+});
+t('la progressione a tempo aggiunge 5 secondi e non si mescola con le ripetizioni', () => {
+  const ex = { id: 'h', name: 'Dead hang', setCount: 2, reps: 40, kg: 0, unit: 'time' };
+  const mk = (id, unit, secs) => ({ id, dayId: 'd', completedAt: id === 'a' ? 1 : 2, exercises: [Object.assign({ exerciseId: 'h', name: 'x', sets: secs.map((r) => ({ reps: r, kg: 0, done: true })) }, unit ? { unit } : {})] });
+  const ok = { sessions: [mk('a', 'time', [40, 42]), mk('b', 'time', [41, 40])] };
+  const sug = L.progressionSuggestion(ok, ex);
+  assert.deepStrictEqual(sug.setReps, [45, 45]); assert.strictEqual(sug.unit, 'time');
+  const old = { sessions: [mk('a', null, [50, 50]), mk('b', null, [50, 50])] };
+  assert.strictEqual(L.progressionSuggestion(old, ex), null, 'sessioni a ripetizioni non valgono per un esercizio a tempo');
+  assert.strictEqual(L.nextTarget(Object.assign({}, ex, { reps: 300 })), null, 'tetto a 5 minuti');
+});
+t('sostituire un esercizio a tempo riparte da 10 ripetizioni', () => {
+  const sub = L.makeSubstitute({ id: 'h', name: 'Dead hang', setCount: 2, reps: 45, kg: 0, unit: 'time', setReps: [45, 30] }, { name: 'Trazioni', group: 'Dorso', equipment: 'corpo libero' }, 'n1');
+  assert.ok(!('unit' in sub) && sub.reps === 10 && !sub.setReps);
+});
+t('il backup conserva gli esercizi a tempo', () => {
+  const prog = L.normalizeProgram({ days: [{ id: 'd', name: 'G', exercises: [{ id: 'h', name: 'Dead hang', setCount: 3, reps: 45, unit: 'time' }] }] });
+  const back = L.parseBackup(JSON.stringify(L.makeBackup(prog, 0)));
+  assert.strictEqual(back.days[0].exercises[0].unit, 'time');
+});
+
 console.log('\n' + n + ' test Allenamenti superati');
