@@ -1,5 +1,5 @@
-const CACHE = 'note-v24';
-const ASSETS = ['./', './index.html', './app.css', './app.js', './analysis.js', './audio.js', './drag_drop.js', './tools.js', './docs.js', './workouts.js', './word_core.js', './word_view.js', './xlsx_core.js', './xlsx_view.js', './convert.js', './pdf_new.js', './pdf_view.js', './pdf_pages.js', './db.js', './crypto.js', './export.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
+const CACHE = 'note-v25';
+const ASSETS = ['./', './index.html', './app.css', './app.js', './analysis.js', './audio.js', './drag_drop.js', './tools.js', './docs.js', './body_map.js', './workouts.js', './word_core.js', './word_view.js', './xlsx_core.js', './xlsx_view.js', './convert.js', './pdf_new.js', './pdf_view.js', './pdf_pages.js', './db.js', './crypto.js', './export.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 // Precache tollerante: se un file manca, l'installazione non fallisce.
 self.addEventListener('install', (event) => event.waitUntil(

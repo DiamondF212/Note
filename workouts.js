@@ -2,6 +2,8 @@
 (function (N) {
   'use strict';
 
+  // Zone muscolari e disegno dei corpi: nel browser li carica body_map.js prima di questo file.
+  const BM = N.bodyMap || (typeof require === 'function' ? require('./body_map.js') : null);
   const STORE_ID = 'program';
   const WEEKDAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
   const MAX_SETS = 20, MAX_REPS = 100, MAX_KG = 1000, MAX_TIME = 3600;
@@ -11,7 +13,7 @@
   const MAX_EX_NOTE = 200, MAX_NOTE = 300, MAX_SESSION_NOTE = 500;
   const REMINDER_BASE = 7200;
   let ctx = null, saveChain = Promise.resolve();
-  const state = { program: null, ui: null, selectedDayId: null };
+  const state = { program: null, ui: null, selectedDayId: null, bmDays: 30, bmZone: null };
 
   function cleanName(value) { return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 60); }
   function whole(value, fallback, min, max) {
@@ -565,6 +567,7 @@
     }
     renderVolumeChart(body);
     renderWeeklyVolume(body);
+    renderMuscleMap(body);
     renderMonthCard(body);
     renderPeriodsCard(body);
     renderConsistency(body);
@@ -1256,6 +1259,7 @@
       mesi: () => ({ a: [back(181), back(91)], b: [back(90), back(0)] })
     };
     let cur = presets.settimane(), active = 'settimane';
+    const cmp = { view: 'front', zone: null };
     const inputs = {};
     const box = ctx.h('div', { class: 'workout-periods', 'data-workout-periods-sheet': '1' });
     const results = ctx.h('div', { class: 'workout-period-results', 'data-period-results': '1' });
@@ -1295,6 +1299,10 @@
         ctx.h('div', { class: 'workout-period-row head', role: 'row' }, ctx.h('span', null, ''), ctx.h('span', null, 'A'), ctx.h('span', null, 'B'), ctx.h('span', null, 'B − A')),
         ...metrics.map(([label, k]) => row(label, shown(c.a[k]), shown(c.b[k]), c.deltas[k])))];
       if (!c.a.sessions || !c.b.sessions) parts.push(ctx.h('p', { class: 'hint', 'data-period-empty': '1' }, 'Nel periodo ' + (!c.a.sessions && !c.b.sessions ? 'A e nel periodo B' : !c.a.sessions ? 'A' : 'B') + ' non ci sono sessioni.'));
+      if (c.a.sessions || c.b.sessions) {
+        parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Mappa dei muscoli'));
+        parts.push(compareBodies(ra, rb, cmp));
+      }
       if (c.groups.length) {
         parts.push(ctx.h('h4', { class: 'workout-month-h' }, 'Serie per gruppo muscolare'));
         parts.push(ctx.h('div', { class: 'workout-period-table', 'data-period-groups': '1' },
@@ -2330,7 +2338,257 @@
     return rows.slice().sort((a, b) => (a[k] - b[k]) * sign || b.t - a.t || a.n - b.n);
   }
 
+  /* ---------- Mappa dei muscoli ed equilibrio ---------- */
+  const MUSCLE_RANGES = [[7, '7 giorni'], [30, '30 giorni'], [90, '3 mesi']];
+  const BALANCE_UPPER = ['Petto', 'Dorso', 'Spalle', 'Bicipiti', 'Tricipiti'];
+
+  // Zona del corpo di un esercizio: dal gruppo scelto, precisata dal movimento se il nome è nel catalogo.
+  function exerciseZone(ex) {
+    const found = findCatalog(ex && ex.name);
+    const own = cleanGroup(ex && ex.group);
+    const group = own && own !== GROUP_OTHER ? own : (found && found.group) || GROUP_OTHER;
+    const z = BM.zoneFor(group, found ? found.pattern : null);
+    return { zone: z.zone, exact: z.exact, group, pattern: found ? found.pattern : null };
+  }
+  function lastDays(days, now) {
+    return { from: (now == null ? Date.now() : now) - days * 864e5, to: Infinity };
+  }
+  function workSets(ex) { return (ex && ex.sets || []).filter((x) => x && x.done && x.type !== 'warmup'); }
+  // Serie di lavoro per zona tra `from` (incluso) e `to` (escluso), con gli esercizi, le ripetizioni e i carichi di ciascuna.
+  function zoneBreakdown(sessions, from, to) {
+    const zones = {};
+    let totalSets = 0, unmapped = 0;
+    (sessions || []).forEach((sess) => {
+      const t = sessionTime(sess);
+      if (t < from || t >= to) return;
+      (sess.exercises || []).forEach((ex) => {
+        const done = workSets(ex);
+        if (!done.length) return;
+        totalSets += done.length;
+        const id = exerciseZone(ex).zone;
+        if (!id) { unmapped += done.length; return; }
+        const timed = isTime(ex);
+        const zone = zones[id] || (zones[id] = { sets: 0, volume: 0, rows: new Map() });
+        const key = normName(ex.name) || String(ex.exerciseId);
+        let row = zone.rows.get(key);
+        if (!row) { row = { name: ex.name, timed, sets: 0, sessions: new Set(), repsMin: Infinity, repsMax: 0, kgMin: Infinity, kgMax: 0, best: null }; zone.rows.set(key, row); }
+        row.sessions.add(sess.id != null ? sess.id : t);
+        done.forEach((x) => {
+          const reps = Number(x.reps) || 0, kg = timed ? 0 : (Number(x.kg) || 0);
+          zone.sets += 1; row.sets += 1;
+          if (!timed) zone.volume += reps * kg;
+          row.repsMin = Math.min(row.repsMin, reps); row.repsMax = Math.max(row.repsMax, reps);
+          row.kgMin = Math.min(row.kgMin, kg); row.kgMax = Math.max(row.kgMax, kg);
+          const better = !row.best || (timed ? reps > row.best.reps : (kg > row.best.kg || (kg === row.best.kg && reps > row.best.reps)));
+          if (better) row.best = { kg, reps };
+        });
+      });
+    });
+    const out = {};
+    let max = 0;
+    Object.keys(zones).forEach((id) => {
+      const z = zones[id];
+      const exercises = Array.from(z.rows.values()).map((r) => ({
+        name: r.name, timed: r.timed, sets: r.sets, sessions: r.sessions.size,
+        repsMin: r.repsMin === Infinity ? 0 : r.repsMin, repsMax: r.repsMax,
+        kgMin: r.kgMin === Infinity ? 0 : r.kgMin, kgMax: r.kgMax, best: r.best
+      })).sort((a, b) => b.sets - a.sets || a.name.localeCompare(b.name));
+      out[id] = { sets: z.sets, volume: Math.round(z.volume), exercises };
+      max = Math.max(max, z.sets);
+    });
+    return { zones: out, max, totalSets, unmapped };
+  }
+  // A quali coppie dell'equilibrio contribuisce un esercizio.
+  function balanceKinds(ex) {
+    const info = exerciseZone(ex), g = info.group, p = info.pattern, kinds = [];
+    if (g === 'Petto' || g === 'Tricipiti') kinds.push('push');
+    else if (g === 'Bicipiti') kinds.push('pull');
+    else if (g === 'Dorso') { if (p !== 'lombari' && p !== 'stacco') kinds.push('pull'); }
+    else if (g === 'Spalle') { if (p === 'posteriori' || p === 'trapezi') kinds.push('pull'); else if (p) kinds.push('push'); }
+    if (g === 'Gambe' && p) {
+      if (p === 'femorali') kinds.push('ham');
+      else if (p === 'squat' || p === 'affondi' || p === 'quadricipiti isolamento') kinds.push('quad');
+    }
+    if (g === 'Gambe' || g === 'Glutei' || (g === 'Dorso' && p === 'stacco')) kinds.push('lower');
+    else if (BALANCE_UPPER.includes(g) && !(g === 'Dorso' && p === 'lombari')) kinds.push('upper');
+    return kinds;
+  }
+  function balanceSets(sessions, from, to) {
+    const out = { push: 0, pull: 0, quad: 0, ham: 0, upper: 0, lower: 0 };
+    (sessions || []).forEach((sess) => {
+      const t = sessionTime(sess);
+      if (t < from || t >= to) return;
+      (sess.exercises || []).forEach((ex) => {
+        const n = workSets(ex).length;
+        if (n) balanceKinds(ex).forEach((k) => { out[k] += n; });
+      });
+    });
+    return out;
+  }
+
+  function spanText(a, b, fmt) { return a === b ? fmt(a) : fmt(a) + '–' + fmt(b); }
+  function exerciseDetailText(e) {
+    const bits = [];
+    if (e.timed) {
+      bits.push('Tempo ' + (e.repsMin === e.repsMax ? fmtTime(e.repsMin) : fmtTime(e.repsMin) + ' – ' + fmtTime(e.repsMax)));
+      if (e.best) bits.push('migliore ' + fmtTime(e.best.reps));
+    } else {
+      bits.push('Rip ' + spanText(e.repsMin, e.repsMax, String));
+      if (e.kgMax > 0) {
+        bits.push(spanText(e.kgMin, e.kgMax, fmtKg) + ' kg');
+        if (e.best) bits.push('migliore ' + fmtKg(e.best.kg) + ' kg × ' + e.best.reps);
+      } else {
+        bits.push('corpo libero');
+        if (e.best) bits.push('migliore ' + e.best.reps + ' rip');
+      }
+    }
+    return bits.join(' · ');
+  }
+  function zoneRows(zoneData, label) {
+    if (!zoneData || !zoneData.sets) return [ctx.h('p', { class: 'hint', 'data-bm-empty': '1' }, 'Nessuna serie per ' + label.toLowerCase() + ' in questo periodo.')];
+    return zoneData.exercises.map((e) => ctx.h('div', { class: 'bm-ex', 'data-bm-exercise': e.name },
+      ctx.h('strong', null, e.name),
+      ctx.h('small', null, e.sets + ' serie · ' + e.sessions + (e.sessions === 1 ? ' sessione' : ' sessioni')),
+      ctx.h('span', null, exerciseDetailText(e))));
+  }
+  function zoneMaps(data, max) {
+    const levels = {}, sets = {};
+    Object.keys(data.zones).forEach((id) => { levels[id] = BM.level(data.zones[id].sets, max); sets[id] = data.zones[id].sets; });
+    return { levels, sets };
+  }
+  function bodyLegend() {
+    return ctx.h('div', { class: 'bm-legend', 'aria-hidden': 'true' }, ctx.h('span', null, 'Meno serie'),
+      ...[1, 2, 3, 4].map((n) => ctx.h('i', { class: 'bm-sw lv' + n })), ctx.h('span', null, 'Più serie'));
+  }
+  // Tocco (o Invio) su un muscolo: chiama pick con l'id della zona.
+  function onZonePick(container, pick) {
+    const zoneOf = (e) => { const g = e.target && e.target.closest ? e.target.closest('[data-zone]') : null; return g && container.contains(g) ? g.getAttribute('data-zone') : null; };
+    container.addEventListener('click', (e) => { const id = zoneOf(e); if (id) pick(id); });
+    container.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const id = zoneOf(e);
+      if (id) { e.preventDefault(); pick(id); }
+    });
+  }
+  function markZone(container, selected) {
+    container.querySelectorAll('[data-zone]').forEach((g) => {
+      const on = g.getAttribute('data-zone') === selected;
+      g.classList.toggle('sel', on);
+      g.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  function muscleChips(repaint) {
+    return ctx.h('div', { class: 'workout-chips', role: 'group', 'aria-label': 'Periodo' },
+      ...MUSCLE_RANGES.map(([days, label]) => ctx.h('button', {
+        class: 'workout-chip' + (state.bmDays === days ? ' active' : ''), type: 'button', 'data-muscle-days': String(days), 'aria-pressed': String(state.bmDays === days),
+        onclick: () => { state.bmDays = days; repaint(); }
+      }, label)));
+  }
+  function periodWords(days) { return days === 90 ? 'ultimi 3 mesi' : 'ultimi ' + days + ' giorni'; }
+
+  function renderMuscleMap(body) {
+    if (!state.program.sessions.length) return;
+    const map = ctx.h('section', { class: 'workout-volume workout-bodymap', 'data-muscle-map': '1' });
+    const bal = ctx.h('section', { class: 'workout-volume workout-balance', 'data-balance': '1' });
+    body.append(map, bal);
+    const paint = () => { paintMuscleMap(map, paint); paintBalance(bal, paint); };
+    paint();
+  }
+  function paintMuscleMap(card, repaint) {
+    const range = lastDays(state.bmDays);
+    const data = zoneBreakdown(state.program.sessions, range.from, range.to);
+    const maps = zoneMaps(data, data.max);
+    const bodies = ctx.h('div', { class: 'bm-bodies' }, ...['front', 'back'].map((view) => ctx.h('figure', { class: 'bm-body', 'data-bm-figure': view },
+      ctx.h('div', { html: BM.svg(view, maps.levels, { sets: maps.sets, selected: state.bmZone }) }),
+      ctx.h('figcaption', null, view === 'front' ? 'Davanti' : 'Dietro'))));
+    const detail = ctx.h('div', { class: 'bm-detail', 'data-muscle-detail': '1', 'aria-live': 'polite' });
+    const paintDetail = () => {
+      const id = state.bmZone;
+      if (!id) { detail.replaceChildren(ctx.h('p', { class: 'hint', 'data-bm-hint': '1' }, 'Tocca un muscolo per vedere esercizi, ripetizioni e carichi.')); return; }
+      const z = data.zones[id], label = BM.zoneLabel(id);
+      detail.replaceChildren(
+        ctx.h('div', { class: 'bm-detail-head' }, ctx.h('strong', null, label),
+          ctx.h('span', null, (z ? z.sets : 0) + ' serie' + (z && z.volume > 0 ? ' · ' + fmtKg(z.volume) + ' kg di volume' : ''))),
+        ...zoneRows(z, label));
+    };
+    onZonePick(bodies, (id) => {
+      state.bmZone = state.bmZone === id ? null : id;
+      if (navigator.vibrate) navigator.vibrate(8);
+      markZone(bodies, state.bmZone);
+      paintDetail();
+    });
+    const summary = data.totalSets
+      ? data.totalSets + ' serie di lavoro negli ' + periodWords(state.bmDays) + '.' + (data.unmapped ? ' ' + data.unmapped + ' senza gruppo muscolare non compaiono sulla mappa.' : '')
+      : 'Nessuna serie completata negli ' + periodWords(state.bmDays) + '.';
+    card.replaceChildren(
+      ctx.h('div', { class: 'workout-section-heading' }, ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, 'MAPPA DEI MUSCOLI'), ctx.h('h3', null, 'Dove lavori di più'))),
+      muscleChips(repaint), bodies, bodyLegend(),
+      ctx.h('p', { class: 'hint', 'data-bm-summary': '1' }, summary), detail);
+    paintDetail();
+  }
+  function paintBalance(card, repaint) {
+    const range = lastDays(state.bmDays);
+    const rows = BM.balance(balanceSets(state.program.sessions, range.from, range.to));
+    const word = { ok: 'Equilibrato', few: 'Pochi dati', 'low-a': 'Da bilanciare', 'low-b': 'Da bilanciare' };
+    card.replaceChildren(
+      ctx.h('div', { class: 'workout-section-heading' }, ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, 'EQUILIBRIO MUSCOLARE'), ctx.h('h3', null, 'Spinta, trazione e gambe'))),
+      muscleChips(repaint),
+      ...rows.map((r) => ctx.h('div', { class: 'bm-balance-row ' + r.status, 'data-balance-row': r.id, 'data-balance-status': r.status },
+        ctx.h('div', { class: 'bm-balance-head' }, ctx.h('strong', null, r.labelA + ' / ' + r.labelB), ctx.h('em', { class: 'bm-badge ' + r.status }, word[r.status])),
+        ctx.h('div', { class: 'bm-balance-bar', role: 'img', 'aria-label': r.labelA + ' ' + r.a + ' serie, ' + r.labelB + ' ' + r.b + ' serie' },
+          ctx.h('span', { class: 'a', style: { width: r.shareA + '%' } }), ctx.h('span', { class: 'b', style: { width: r.shareB + '%' } })),
+        ctx.h('div', { class: 'bm-balance-nums' }, ctx.h('span', null, r.labelA + ' · ' + r.a + ' serie'), ctx.h('span', null, r.labelB + ' · ' + r.b + ' serie')),
+        r.advice ? ctx.h('p', { class: 'bm-advice', 'data-balance-advice': '1' }, r.advice)
+          : r.status === 'few' ? ctx.h('p', { class: 'hint' }, 'Servono almeno ' + BM.MIN_SETS + ' serie in questo periodo per un confronto.') : null)),
+      ctx.h('p', { class: 'hint' }, 'Indicativo: conta le serie di lavoro degli ' + periodWords(state.bmDays) + '. Quadricipiti e femorali usano solo gli esercizi riconosciuti dal catalogo.'));
+  }
+  // Due corpi affiancati (periodo A e B) con la stessa scala di colore; il tocco su un muscolo mostra gli esercizi di entrambi i periodi.
+  function compareBodies(ra, rb, cmp) {
+    const za = zoneBreakdown(state.program.sessions, ra.from, ra.to), zb = zoneBreakdown(state.program.sessions, rb.from, rb.to);
+    const max = Math.max(za.max, zb.max);
+    const ma = zoneMaps(za, max), mb = zoneMaps(zb, max);
+    const box = ctx.h('div', { class: 'bm-compare', 'data-period-bodies': '1' });
+    function paint() {
+      const views = ctx.h('div', { class: 'workout-chips', role: 'group', 'aria-label': 'Vista del corpo' },
+        ...[['front', 'Davanti'], ['back', 'Dietro']].map(([v, label]) => ctx.h('button', {
+          class: 'workout-chip' + (cmp.view === v ? ' active' : ''), type: 'button', 'data-period-view': v, 'aria-pressed': String(cmp.view === v),
+          onclick: () => {
+            cmp.view = v;
+            const z = BM.ZONES.find((x) => x.id === cmp.zone);
+            if (z && !z.views.includes(v)) cmp.zone = null; // il muscolo scelto non si vede da questo lato
+            paint();
+          }
+        }, label)));
+      const bodies = ctx.h('div', { class: 'bm-bodies' }, ...[['A', za, ma], ['B', zb, mb]].map(([name, d, m]) => ctx.h('figure', { class: 'bm-body', 'data-period-body': name },
+        ctx.h('div', { html: BM.svg(cmp.view, m.levels, { sets: m.sets, selected: cmp.zone }) }),
+        ctx.h('figcaption', null, 'Periodo ' + name + ' · ' + d.totalSets + ' serie'))));
+      const detail = ctx.h('div', { class: 'bm-detail', 'data-period-detail': '1', 'aria-live': 'polite' });
+      const paintDetail = () => {
+        if (!cmp.zone) { detail.replaceChildren(ctx.h('p', { class: 'hint', 'data-bm-hint': '1' }, 'Tocca un muscolo per vedere gli esercizi dei due periodi.')); return; }
+        const label = BM.zoneLabel(cmp.zone), a = za.zones[cmp.zone], b = zb.zones[cmp.zone];
+        const sa = a ? a.sets : 0, sb = b ? b.sets : 0, diff = sb - sa;
+        detail.replaceChildren(
+          ctx.h('div', { class: 'bm-detail-head' }, ctx.h('strong', null, label),
+            ctx.h('span', { 'data-bm-delta': '1' }, 'A ' + sa + ' → B ' + sb + ' serie' + (diff === 0 ? '' : ' (' + signed(diff) + ')'))),
+          ctx.h('h5', { class: 'bm-period-h' }, 'Periodo A · ' + sa + ' serie'), ...zoneRows(a, label),
+          ctx.h('h5', { class: 'bm-period-h' }, 'Periodo B · ' + sb + ' serie'), ...zoneRows(b, label));
+      };
+      onZonePick(bodies, (id) => {
+        cmp.zone = cmp.zone === id ? null : id;
+        if (navigator.vibrate) navigator.vibrate(8);
+        markZone(bodies, cmp.zone);
+        paintDetail();
+      });
+      box.replaceChildren(views, bodies, bodyLegend(), detail);
+      paintDetail();
+    }
+    paint();
+    return box;
+  }
+
+
   const _logic = { mobilityPlan, mobilityDone, toggleMobility, setAllMobility, mobilityProgress, mobilityField, MOBILITY, parseDayKey, periodRange, periodStats, comparePeriods, bestByExercise, exerciseSets, sortSets, progressionSuggestion, nextTarget, applyTarget, retargetSession, sessionMeetsTarget, findCatalog, substituteSuggestions, substituteKg, makeSubstitute, weeklyVolumeSeries, monthlySummary, bestProgress, groupVolumeBetween, CATALOG, cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet, isTime, fmtTime, fmtClock,
+    exerciseZone, zoneBreakdown, balanceKinds, balanceSets, lastDays, exerciseDetailText,
     dayKey, startOfWeek, weekStreak, weekDots, monthGrid, bodyWeight, upsertBodyWeight, dateInputToTime, reminderPlan, parseTime, SET_TYPES, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.workouts;

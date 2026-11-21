@@ -1007,3 +1007,50 @@ main#list { padding-bottom: calc(132px + var(--sab)); }
 .workout-unit-box .field { padding-right: 30px; }
 .workout-unit-select { position: absolute; top: 0; right: 0; bottom: 0; width: 34px; opacity: 0; cursor: pointer; border: 0; font-size: 16px; }
 .workout-unit-arrow { position: absolute; right: 11px; top: 50%; width: 7px; height: 7px; margin-top: -6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); pointer-events: none; }
+
+/* Mappa dei muscoli ed equilibrio */
+.bm-bodies { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 4px; }
+.bm-body { margin: 0; text-align: center; }
+.bm-body figcaption { margin-top: 4px; color: var(--muted); font-size: .72rem; }
+.bm-svg { display: block; width: 100%; max-width: 170px; max-height: 300px; height: auto; margin: 0 auto; -webkit-tap-highlight-color: transparent; }
+.bm-base * { fill: color-mix(in srgb, var(--ink) 7%, var(--surface)); }
+.bm-zone { cursor: pointer; outline: none; transform-box: fill-box; transform-origin: center; transition: transform .18s var(--ease-smooth); }
+.bm-zone path { fill: color-mix(in srgb, var(--ink) 15%, var(--surface)); stroke: var(--surface); stroke-width: 1; transition: fill .35s var(--ease-smooth), opacity .15s ease; animation: bm-in .45s var(--ease-smooth) both; }
+.bm-zone.lv1 path { fill: color-mix(in srgb, var(--accent) 30%, var(--surface2)); }
+.bm-zone.lv2 path { fill: color-mix(in srgb, var(--accent) 52%, var(--surface2)); }
+.bm-zone.lv3 path { fill: color-mix(in srgb, var(--accent) 76%, var(--surface2)); }
+.bm-zone.lv4 path { fill: var(--accent); }
+.bm-zone:active { transform: scale(.94); }
+.bm-zone:active path { opacity: .65; }
+.bm-zone.sel path { stroke: var(--ink); stroke-width: 2; }
+.bm-zone:focus-visible path { stroke: var(--ink); stroke-width: 2; }
+@keyframes bm-in { from { opacity: .25; } to { opacity: 1; } }
+.bm-legend { display: flex; align-items: center; justify-content: center; gap: 5px; margin: 6px 0 2px; color: var(--muted); font-size: .68rem; }
+.bm-sw { display: block; width: 22px; height: 8px; border-radius: 4px; }
+.bm-sw.lv1 { background: color-mix(in srgb, var(--accent) 30%, var(--surface2)); }
+.bm-sw.lv2 { background: color-mix(in srgb, var(--accent) 52%, var(--surface2)); }
+.bm-sw.lv3 { background: color-mix(in srgb, var(--accent) 76%, var(--surface2)); }
+.bm-sw.lv4 { background: var(--accent); }
+.bm-detail { margin-top: 10px; padding: 12px; border-radius: 14px; background: color-mix(in srgb, var(--ink) 6%, transparent); animation: bm-in .3s var(--ease-smooth) both; }
+.bm-detail .hint { margin: 0; }
+.bm-detail-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.bm-detail-head strong { font-size: .95rem; }
+.bm-detail-head span { color: var(--muted); font-size: .74rem; text-align: right; }
+.bm-period-h { margin: 12px 0 2px; color: var(--accent); font-size: .76rem; font-weight: 650; }
+.bm-ex { display: grid; gap: 1px; padding: 8px 0; border-top: 1px solid var(--line); }
+.bm-ex strong { font-size: .84rem; }
+.bm-ex small { color: var(--muted); font-size: .7rem; }
+.bm-ex span { font-size: .76rem; }
+.bm-compare { margin-top: 4px; }
+.bm-compare .bm-svg { max-width: 150px; }
+.bm-balance-row { margin: 14px 0; }
+.bm-balance-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: .82rem; }
+.bm-badge { padding: 3px 9px; border-radius: 999px; font-size: .66rem; font-style: normal; font-weight: 650; background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--muted); }
+.bm-badge.ok { background: color-mix(in srgb, #66bb6a 18%, transparent); color: #66bb6a; }
+.bm-badge.low-a, .bm-badge.low-b { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.bm-balance-bar { display: flex; height: 10px; margin: 8px 0 5px; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.bm-balance-bar span { display: block; height: 100%; transition: width .45s var(--ease-smooth); }
+.bm-balance-bar .a { background: var(--accent); }
+.bm-balance-bar .b { background: #64b5f6; }
+.bm-balance-nums { display: flex; justify-content: space-between; color: var(--muted); font-size: .7rem; }
+.bm-advice { margin: 7px 0 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: .76rem; line-height: 1.35; }

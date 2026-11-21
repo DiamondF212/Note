@@ -388,7 +388,7 @@ const ok = (c, m) => { if (!c) throw new Error(m || 'condizione falsa'); };
   await page.evaluate(() => navigator.serviceWorker.ready); await page.waitForTimeout(800);
   await t('offline: tools.js è nella cache del service worker', async () => {
     const hit = await page.evaluate(async () => !!(await caches.match('./tools.js'))); ok(hit, 'tools.js non in cache');
-    const keys = await page.evaluate(() => caches.keys()); ok(keys.includes('note-v24'), keys.join());
+    const keys = await page.evaluate(() => caches.keys()); ok(keys.includes('note-v25'), keys.join());
   });
   await ctx.setOffline(true);
   await page.reload(); await page.waitForSelector('#list');
