@@ -80,20 +80,33 @@
   const both = (d) => '<path d="' + d + '"/>' + mirrored(d);
 
   // levels: { zoneId: 0..4 }, sets: { zoneId: serie } (solo per l'etichetta), selected: id della zona toccata.
+  // states: { zoneId: 'ready' | 'wait' | 'none' } colora per recupero; labels: { zoneId: testo } sostituisce l'etichetta letta dagli schermi.
   function svg(view, levels, opts) {
     const v = view === 'back' ? 'back' : 'front';
     const o = opts || {}, lv = levels || {}, sets = o.sets || {};
     const zones = ZONES.filter((z) => z.views.includes(v)).map((z) => {
       const n = Math.max(0, Math.min(4, Number(lv[z.id]) || 0));
       const count = Number(sets[z.id]) || 0;
-      const label = z.label + ': ' + count + ' serie';
-      return '<g class="bm-zone lv' + n + (o.selected === z.id ? ' sel' : '') + '" data-zone="' + z.id + '" role="button" tabindex="0" aria-pressed="' + (o.selected === z.id ? 'true' : 'false') + '" aria-label="' + label + '">'
+      const label = (o.labels && o.labels[z.id]) || (z.label + ': ' + count + ' serie');
+      const stateClass = o.states && o.states[z.id] ? ' st-' + o.states[z.id] : '';
+      return '<g class="bm-zone lv' + n + stateClass + (o.selected === z.id ? ' sel' : '') + '" data-zone="' + z.id + '" role="button" tabindex="0" aria-pressed="' + (o.selected === z.id ? 'true' : 'false') + '" aria-label="' + label + '">'
         + '<title>' + label + '</title>' + both(SHAPES[v][z.id]) + '</g>';
     }).join('');
     return '<svg class="bm-svg" viewBox="0 0 200 430" role="group" aria-label="' + (v === 'front' ? 'Corpo visto da davanti' : 'Corpo visto da dietro') + '" data-bm-view="' + v + '" xmlns="http://www.w3.org/2000/svg">'
       + '<g class="bm-base">' + both(BASE) + '<ellipse cx="100" cy="26" rx="15" ry="18"/><rect x="92" y="42" width="16" height="18" rx="4"/></g>'
       + zones + '</svg>';
   }
+
+  /* ---------- Recupero ---------- */
+  // Ore di recupero di partenza: i muscoli grandi e le zone che lavorano con carichi alti hanno bisogno di più tempo.
+  const RECOVERY_BASE = { spalle: 48, petto: 72, bicipiti: 48, addome: 48, quadricipiti: 72, adduttori: 48, trapezi: 48, dorso: 72, lombari: 72, tricipiti: 48, glutei: 72, femorali: 72, polpacci: 48 };
+  const RECOVERY_FREE_SETS = 6, RECOVERY_STEP_SETS = 3, RECOVERY_STEP_HOURS = 12, RECOVERY_MAX_EXTRA = 48;
+  // Adattivo: fino a 6 serie nella sessione vale il tempo base; oltre, +12 ore ogni 3 serie, al massimo +48.
+  function recoveryExtra(sets) {
+    const s = Math.max(0, Number(sets) || 0);
+    return Math.min(RECOVERY_MAX_EXTRA, RECOVERY_STEP_HOURS * Math.ceil(Math.max(0, s - RECOVERY_FREE_SETS) / RECOVERY_STEP_SETS));
+  }
+  function recoveryNeed(zone, sets) { return (RECOVERY_BASE[zone] || 48) + recoveryExtra(sets); }
 
   /* ---------- Equilibrio muscolare ---------- */
   const MIN_SETS = 6; // sotto questo totale il rapporto non dice niente
@@ -125,7 +138,7 @@
     return [judge(PAIRS[0], s.push, s.pull), judge(PAIRS[1], s.quad, s.ham), judge(PAIRS[2], s.upper, s.lower)];
   }
 
-  const _logic = { ZONES, ZONE_IDS, GROUP_ZONE, PATTERN_ZONE, PAIRS, MIN_SETS, zoneFor, zoneLabel, isZone, level, judge, balance, SHAPES };
-  N.bodyMap = { ZONES, zoneFor, zoneLabel, isZone, level, svg, balance, judge, PAIRS, MIN_SETS, _logic };
+  const _logic = { RECOVERY_BASE, recoveryExtra, recoveryNeed, ZONES, ZONE_IDS, GROUP_ZONE, PATTERN_ZONE, PAIRS, MIN_SETS, zoneFor, zoneLabel, isZone, level, judge, balance, SHAPES };
+  N.bodyMap = { RECOVERY_BASE, recoveryNeed, recoveryExtra, ZONES, zoneFor, zoneLabel, isZone, level, svg, balance, judge, PAIRS, MIN_SETS, _logic };
   if (typeof module !== 'undefined' && module.exports) module.exports = N.bodyMap;
 })((typeof window !== 'undefined' ? (window.N = window.N || {}) : {}));

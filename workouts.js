@@ -13,7 +13,7 @@
   const MAX_EX_NOTE = 200, MAX_NOTE = 300, MAX_SESSION_NOTE = 500;
   const REMINDER_BASE = 7200;
   let ctx = null, saveChain = Promise.resolve();
-  const state = { program: null, ui: null, selectedDayId: null, bmDays: 30, bmZone: null };
+  const state = { program: null, ui: null, selectedDayId: null, bmDays: 30, bmZone: null, rcZone: null };
 
   function cleanName(value) { return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 60); }
   function whole(value, fallback, min, max) {
@@ -568,9 +568,11 @@
     renderVolumeChart(body);
     renderWeeklyVolume(body);
     renderMuscleMap(body);
+    renderRecovery(body);
     renderMonthCard(body);
     renderPeriodsCard(body);
     renderConsistency(body);
+    renderBadges(body);
     renderBodyWeight(body);
     renderBackup(body);
   }
@@ -1682,6 +1684,7 @@
           ctx.h('strong', null, fmtKg(best.value) + ' kg'),
           ctx.h('small', null, 'da ' + fmtKg(best.kg) + ' kg × ' + best.reps + ' · ' + fmtDate(best.t))));
         nodes.push(ctx.h('p', { class: 'hint' }, 'Stima con la formula di Epley, valida fino a 12 ripetizioni: è un’indicazione, non un test.'));
+        nodes.push(ctx.h('h4', { class: 'wk-chart-title' }, 'Carichi per ripetizioni'), repTableCard(best));
       }
       return nodes;
     }
@@ -2587,7 +2590,230 @@
   }
 
 
+  /* ---------- Tabella dei massimali a scalare ---------- */
+  const REP_TABLE = [1, 3, 5, 8, 10, 12];
+  function roundToPlate(kg) { return Math.max(2.5, Math.round(Number(kg) / 2.5) * 2.5); }
+  // Dal massimale stimato, il carico per ogni numero di ripetizioni (Epley al contrario), arrotondato a 2,5 kg.
+  function repTable(oneRm) {
+    const v = Number(oneRm);
+    if (!(v > 0)) return [];
+    return REP_TABLE.map((reps) => {
+      const raw = reps === 1 ? v : v / (1 + reps / 30);
+      return { reps, pct: Math.round((raw / v) * 100), kg: roundToPlate(raw) };
+    });
+  }
+  function repTableCard(best) {
+    const rows = repTable(best.value);
+    return ctx.h('div', { class: 'workout-repmax', 'data-workout-repmax': '1', role: 'table' },
+      ctx.h('div', { class: 'workout-repmax-row head', role: 'row' }, ctx.h('span', null, 'Ripetizioni'), ctx.h('span', null, '% del massimale'), ctx.h('span', null, 'Carico')),
+      ...rows.map((r) => ctx.h('div', { class: 'workout-repmax-row', role: 'row', 'data-repmax-reps': String(r.reps) },
+        ctx.h('span', null, r.reps === 1 ? '1 (massimale)' : String(r.reps)), ctx.h('span', null, r.pct + '%'), ctx.h('b', null, fmtKg(r.kg) + ' kg'))),
+      ctx.h('p', { class: 'hint' }, 'Carichi arrotondati a 2,5 kg, calcolati dal massimale stimato di ' + fmtKg(best.value) + ' kg: sono un punto di partenza, non un obiettivo.'));
+  }
+
+  /* ---------- Recupero per gruppo muscolare ---------- */
+  function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
+  // Giorni di calendario da b ad a (positivo se a viene dopo).
+  function dayDiff(a, b) { return Math.round((startOfDay(a) - startOfDay(b)) / 864e5); }
+  function hoursText(h) {
+    const n = Math.max(0, Math.ceil(Number(h) || 0));
+    if (n < 1) return 'meno di un’ora';
+    if (n < 24) return n + (n === 1 ? ' ora' : ' ore');
+    const d = Math.floor(n / 24), r = n % 24;
+    return d + (d === 1 ? ' giorno' : ' giorni') + (r ? ' e ' + r + (r === 1 ? ' ora' : ' ore') : '');
+  }
+  function agoText(ts, now) {
+    const d = dayDiff(now, ts);
+    return d <= 0 ? 'oggi' : d === 1 ? 'ieri' : d + ' giorni fa';
+  }
+  function whenText(ts, now) {
+    const d = dayDiff(ts, now), time = new Date(ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    if (d <= 0) return 'oggi alle ' + time;
+    if (d === 1) return 'domani alle ' + time;
+    return new Date(ts).toLocaleDateString('it-IT', { weekday: 'long' }) + ' alle ' + time;
+  }
+  // Per ogni zona: quando è stata allenata l'ultima volta, con quante serie, e quando sarà pronta.
+  // status: 'none' (mai allenata), 'wait' (in recupero), 'ready' (pronta).
+  function zoneRecovery(sessions, now) {
+    const t0 = now == null ? Date.now() : now;
+    const last = {};
+    (sessions || []).forEach((sess) => {
+      const t = sessionTime(sess);
+      if (!(t > 0) || t > t0) return;
+      const per = {};
+      (sess.exercises || []).forEach((ex) => {
+        const n = workSets(ex).length;
+        const z = n ? exerciseZone(ex).zone : null;
+        if (z) per[z] = (per[z] || 0) + n;
+      });
+      Object.keys(per).forEach((z) => { if (!last[z] || t > last[z].t) last[z] = { t, sets: per[z] }; });
+    });
+    const out = {};
+    BM.ZONES.forEach((z) => {
+      const l = last[z.id];
+      if (!l) { out[z.id] = { zone: z.id, status: 'none', lastAt: null, sets: 0, needHours: BM.recoveryNeed(z.id, 0), readyAt: null, hoursLeft: 0, pct: 0 }; return; }
+      const need = BM.recoveryNeed(z.id, l.sets), readyAt = l.t + need * 36e5, left = (readyAt - t0) / 36e5;
+      out[z.id] = { zone: z.id, status: left > 0 ? 'wait' : 'ready', lastAt: l.t, sets: l.sets, needHours: need, readyAt, hoursLeft: left > 0 ? Math.ceil(left) : 0, pct: Math.max(0, Math.min(100, Math.round(((t0 - l.t) / 36e5 / need) * 100))) };
+    });
+    return out;
+  }
+  const RC_LABEL = { ready: 'Pronto', wait: 'In recupero', none: 'Mai allenato' };
+  function recoveryShort(r, now) {
+    return r.status === 'ready' ? 'pronto' : r.status === 'wait' ? 'pronto ' + whenText(r.readyAt, now) : 'mai allenato';
+  }
+  // Prima i muscoli in recupero (i più vicini a essere pronti per primi), poi quelli pronti (i più riposati per primi), infine i mai allenati.
+  function recoveryOrder(rec) {
+    const rank = { wait: 0, ready: 1, none: 2 };
+    return BM.ZONES.map((z) => rec[z.id]).sort((a, b) => rank[a.status] - rank[b.status]
+      || (a.status === 'wait' ? a.hoursLeft - b.hoursLeft : a.status === 'ready' ? a.lastAt - b.lastAt : 0)
+      || BM.ZONES.findIndex((z) => z.id === a.zone) - BM.ZONES.findIndex((z) => z.id === b.zone));
+  }
+  function renderRecovery(body) {
+    if (!state.program.sessions.length) return;
+    const card = ctx.h('section', { class: 'workout-volume workout-recovery', 'data-recovery': '1' });
+    body.append(card);
+    paintRecovery(card);
+  }
+  function paintRecovery(card) {
+    const now = Date.now();
+    const rec = zoneRecovery(state.program.sessions, now);
+    const states = {}, labels = {};
+    BM.ZONES.forEach((z) => { states[z.id] = rec[z.id].status; labels[z.id] = z.label + ': ' + recoveryShort(rec[z.id], now); });
+    const count = (st) => Object.keys(rec).filter((id) => rec[id].status === st).length;
+    const bodies = ctx.h('div', { class: 'bm-bodies' }, ...['front', 'back'].map((view) => ctx.h('figure', { class: 'bm-body', 'data-rc-figure': view },
+      ctx.h('div', { html: BM.svg(view, {}, { states, labels, selected: state.rcZone }) }),
+      ctx.h('figcaption', null, view === 'front' ? 'Davanti' : 'Dietro'))));
+    const detail = ctx.h('div', { class: 'bm-detail', 'data-recovery-detail': '1', 'aria-live': 'polite' });
+    const list = ctx.h('div', { class: 'bm-rc-list' }, ...recoveryOrder(rec).map((r) => ctx.h('button', {
+      class: 'bm-rc-row ' + r.status + (state.rcZone === r.zone ? ' sel' : ''), type: 'button', 'data-recovery-zone': r.zone, 'data-recovery-status': r.status,
+      onclick: () => select(r.zone)
+    },
+      ctx.h('strong', null, BM.zoneLabel(r.zone)),
+      ctx.h('span', null, r.status === 'wait' ? 'tra ' + hoursText(r.hoursLeft) : RC_LABEL[r.status]),
+      ctx.h('i', { class: 'bm-rc-bar' }, ctx.h('b', { style: { width: (r.status === 'ready' ? 100 : r.pct) + '%' } })))));
+    const paintDetail = () => {
+      const id = state.rcZone;
+      if (!id) { detail.replaceChildren(ctx.h('p', { class: 'hint', 'data-bm-hint': '1' }, 'Tocca un muscolo, sul corpo o nell’elenco, per vedere il recupero.')); return; }
+      const r = rec[id], label = BM.zoneLabel(id);
+      const head = ctx.h('div', { class: 'bm-detail-head' }, ctx.h('strong', null, label), ctx.h('span', null, RC_LABEL[r.status]));
+      if (r.status === 'none') { detail.replaceChildren(head, ctx.h('p', { class: 'hint' }, 'Nessuna serie di lavoro registrata per ' + label.toLowerCase() + '.')); return; }
+      const base = BM.RECOVERY_BASE[id] || 48, extra = r.needHours - base;
+      detail.replaceChildren(head,
+        ctx.h('p', { class: 'bm-rc-line' }, 'Ultimo allenamento: ' + agoText(r.lastAt, now) + ' · ' + r.sets + ' serie'),
+        ctx.h('p', { class: 'bm-rc-line', 'data-recovery-need': '1' }, 'Recupero stimato: ' + base + ' ore' + (extra > 0 ? ' + ' + extra + ' per le ' + r.sets + ' serie = ' + r.needHours + ' ore' : '')),
+        ctx.h('p', { class: 'bm-rc-line strong' }, r.status === 'ready' ? 'Pronto: puoi allenarlo.' : 'Pronto ' + whenText(r.readyAt, now) + ' (tra ' + hoursText(r.hoursLeft) + ').'));
+    };
+    function select(id) {
+      state.rcZone = state.rcZone === id ? null : id;
+      if (navigator.vibrate) navigator.vibrate(8);
+      markZone(bodies, state.rcZone);
+      list.querySelectorAll('[data-recovery-zone]').forEach((b) => b.classList.toggle('sel', b.getAttribute('data-recovery-zone') === state.rcZone));
+      paintDetail();
+    }
+    onZonePick(bodies, select);
+    const ready = count('ready'), wait = count('wait'), none = count('none');
+    const summary = ready + (ready === 1 ? ' muscolo pronto' : ' muscoli pronti') + ' · ' + wait + ' in recupero' + (none ? ' · ' + none + ' mai allenati' : '');
+    card.replaceChildren(
+      ctx.h('div', { class: 'workout-section-heading' }, ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, 'RECUPERO'), ctx.h('h3', null, 'Cosa è pronto oggi'))),
+      ctx.h('p', { class: 'hint', 'data-recovery-summary': '1' }, summary), bodies,
+      ctx.h('div', { class: 'bm-legend', 'aria-hidden': 'true' }, ctx.h('i', { class: 'bm-sw st-ready' }), ctx.h('span', null, 'Pronto'), ctx.h('i', { class: 'bm-sw st-wait' }), ctx.h('span', null, 'In recupero'), ctx.h('i', { class: 'bm-sw st-none' }), ctx.h('span', null, 'Mai allenato')),
+      detail, list,
+      ctx.h('p', { class: 'hint' }, 'Stima indicativa: parte da 48 o 72 ore a seconda del muscolo e si allunga di 12 ore ogni 3 serie oltre le 6 dell’ultima sessione.'));
+    paintDetail();
+  }
+
+  /* ---------- Traguardi di costanza ---------- */
+  const BADGE_DEFS = [
+    ['sess-1', 'sessions', 1, 'Primo passo', 'Completa la tua prima sessione', 'dumbbell'],
+    ['sess-10', 'sessions', 10, '10 sessioni', 'Completa 10 sessioni in totale', 'dumbbell'],
+    ['sess-25', 'sessions', 25, '25 sessioni', 'Completa 25 sessioni in totale', 'dumbbell'],
+    ['sess-50', 'sessions', 50, '50 sessioni', 'Completa 50 sessioni in totale', 'dumbbell'],
+    ['sess-100', 'sessions', 100, '100 sessioni', 'Completa 100 sessioni in totale', 'dumbbell'],
+    ['streak-2', 'streak', 2, '2 settimane di fila', 'Almeno una sessione per 2 settimane consecutive', 'flame'],
+    ['streak-4', 'streak', 4, '4 settimane di fila', 'Almeno una sessione per 4 settimane consecutive', 'flame'],
+    ['streak-8', 'streak', 8, '8 settimane di fila', 'Almeno una sessione per 8 settimane consecutive', 'flame'],
+    ['streak-12', 'streak', 12, '12 settimane di fila', 'Almeno una sessione per 12 settimane consecutive', 'flame'],
+    ['month-8', 'month', 8, 'Mese pieno', '8 sessioni nello stesso mese', 'calendar'],
+    ['month-12', 'month', 12, 'Mese da campione', '12 sessioni nello stesso mese', 'calendar'],
+    ['body', 'body', 6, 'Corpo intero', 'Petto, dorso, spalle, braccia, gambe e addome nella stessa settimana', 'scale']
+  ].map((r) => ({ id: r[0], kind: r[1], goal: r[2], title: r[3], desc: r[4], icon: r[5] }));
+  const BODY_CATEGORY = { petto: 'petto', dorso: 'dorso', spalle: 'spalle', bicipiti: 'braccia', tricipiti: 'braccia', quadricipiti: 'gambe', femorali: 'gambe', glutei: 'gambe', addome: 'addome' };
+  const BADGE_NEW_DAYS = 7;
+  // Traguardi guadagnati per sempre: una volta ottenuti restano anche se poi salti una settimana.
+  // Ognuno ha `value` (il tuo miglior risultato finora, al massimo `goal`) ed `earnedAt` (quando l'hai ottenuto).
+  function badges(sessions, now) {
+    const t0 = now == null ? Date.now() : now;
+    const sorted = (sessions || []).filter((s) => sessionTime(s) > 0).sort((a, b) => sessionTime(a) - sessionTime(b));
+    const times = sorted.map(sessionTime);
+    const weekFirst = new Map();
+    times.forEach((t) => { const w = startOfWeek(t); if (!weekFirst.has(w)) weekFirst.set(w, t); });
+    const weeks = Array.from(weekFirst.keys()).sort((a, b) => a - b);
+    const nextWeek = (w) => { const d = new Date(w); d.setDate(d.getDate() + 7); return d.getTime(); };
+    const streakAt = {};
+    let run = 0, bestRun = 0;
+    weeks.forEach((w, i) => {
+      run = i > 0 && nextWeek(weeks[i - 1]) === w ? run + 1 : 1;
+      bestRun = Math.max(bestRun, run);
+      BADGE_DEFS.filter((b) => b.kind === 'streak').forEach((b) => { if (run >= b.goal && streakAt[b.goal] == null) streakAt[b.goal] = weekFirst.get(w); });
+    });
+    const months = new Map();
+    times.forEach((t) => { const d = new Date(t), k = d.getFullYear() * 12 + d.getMonth(); if (!months.has(k)) months.set(k, []); months.get(k).push(t); });
+    const monthAt = {};
+    let bestMonth = 0;
+    months.forEach((arr) => {
+      bestMonth = Math.max(bestMonth, arr.length);
+      BADGE_DEFS.filter((b) => b.kind === 'month').forEach((b) => { if (arr.length >= b.goal && monthAt[b.goal] == null) monthAt[b.goal] = arr[b.goal - 1]; });
+    });
+    const cover = new Map();
+    let bestCover = 0, bodyAt = null;
+    sorted.forEach((sess) => {
+      const t = sessionTime(sess), w = startOfWeek(t);
+      if (!cover.has(w)) cover.set(w, new Set());
+      const set = cover.get(w);
+      (sess.exercises || []).forEach((ex) => {
+        if (!workSets(ex).length) return;
+        const z = exerciseZone(ex).zone, c = z && BODY_CATEGORY[z];
+        if (c) set.add(c);
+      });
+      bestCover = Math.max(bestCover, set.size);
+      if (set.size >= 6 && bodyAt == null) bodyAt = t;
+    });
+    return BADGE_DEFS.map((b) => {
+      let value = 0, earnedAt = null;
+      if (b.kind === 'sessions') { value = times.length; if (value >= b.goal) earnedAt = times[b.goal - 1]; }
+      else if (b.kind === 'streak') { value = bestRun; earnedAt = streakAt[b.goal] == null ? null : streakAt[b.goal]; }
+      else if (b.kind === 'month') { value = bestMonth; earnedAt = monthAt[b.goal] == null ? null : monthAt[b.goal]; }
+      else { value = bestCover; earnedAt = bodyAt; }
+      const earned = earnedAt != null;
+      return { id: b.id, kind: b.kind, title: b.title, desc: b.desc, icon: b.icon, goal: b.goal, value: Math.min(value, b.goal), earned, earnedAt, isNew: earned && t0 - earnedAt < BADGE_NEW_DAYS * 864e5 };
+    });
+  }
+  function renderBadges(body) {
+    if (!state.program.sessions.length) return;
+    const list = badges(state.program.sessions, Date.now());
+    const done = list.filter((b) => b.earned).length;
+    body.append(ctx.h('section', { class: 'workout-volume workout-badges', 'data-badges': '1' },
+      ctx.h('div', { class: 'workout-section-heading' },
+        ctx.h('div', null, ctx.h('p', { class: 'workout-eyebrow' }, 'TRAGUARDI'), ctx.h('h3', null, 'Costanza')),
+        ctx.h('span', { class: 'workout-count', 'data-badges-count': '1' }, done + ' / ' + list.length)),
+      ctx.h('div', { class: 'wb-grid' }, ...list.map((b) => ctx.h('button', {
+        class: 'wb-item ' + (b.earned ? 'earned' : 'locked') + (b.isNew ? ' new' : ''), type: 'button', 'data-badge': b.id, 'data-badge-earned': String(b.earned),
+        'aria-label': b.title + (b.earned ? ', ottenuto' : ', ' + b.value + ' di ' + b.goal),
+        onclick: () => {
+          if (navigator.vibrate) navigator.vibrate(8);
+          ctx.toast(b.earned ? b.title + ' · ' + b.desc + ' · ottenuto il ' + fmtDate(b.earnedAt) : b.title + ': ' + b.desc + ' (' + b.value + ' di ' + b.goal + ')', 4200);
+        }
+      },
+        ctx.h('span', { class: 'wb-medal', html: ctx.I(b.icon, 22) }),
+        ctx.h('strong', null, b.title),
+        b.earned ? ctx.h('small', null, b.isNew ? 'Nuovo · ' + fmtDate(b.earnedAt) : fmtDate(b.earnedAt))
+          : ctx.h('small', null, b.value + ' / ' + b.goal),
+        b.earned ? null : ctx.h('i', { class: 'wb-bar' }, ctx.h('b', { style: { width: Math.round((b.value / b.goal) * 100) + '%' } })))))));
+  }
+
+
   const _logic = { mobilityPlan, mobilityDone, toggleMobility, setAllMobility, mobilityProgress, mobilityField, MOBILITY, parseDayKey, periodRange, periodStats, comparePeriods, bestByExercise, exerciseSets, sortSets, progressionSuggestion, nextTarget, applyTarget, retargetSession, sessionMeetsTarget, findCatalog, substituteSuggestions, substituteKg, makeSubstitute, weeklyVolumeSeries, monthlySummary, bestProgress, groupVolumeBetween, CATALOG, cleanGroup, groupOf, weeklyGroupVolume, estimateOneRm, bestOneRm, warmupPlan, previousSession, compareSessions, makeBackup, parseBackup, GROUPS, cleanName, whole, weight, makeSession, sessionStats, recentCount, normalizeProgram, exerciseHistory, lineChartSvg, reorderById, cleanType, cleanNote, cleanRpe, repsFor, typeFor, repsSummary, makeSet, isTime, fmtTime, fmtClock,
+    repTable, roundToPlate, zoneRecovery, recoveryOrder, hoursText, agoText, whenText, dayDiff, badges, BADGE_DEFS,
     exerciseZone, zoneBreakdown, balanceKinds, balanceSets, lastDays, exerciseDetailText,
     dayKey, startOfWeek, weekStreak, weekDots, monthGrid, bodyWeight, upsertBodyWeight, dateInputToTime, reminderPlan, parseTime, SET_TYPES, MAX_SETS, MAX_REPS, MAX_KG, WEEKDAYS };
   N.workouts = { init, open, _logic, _state: state };
