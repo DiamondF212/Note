@@ -18,6 +18,8 @@ Struttura delle risposte complesse: 🧠 Analisi e Ragionamento · 🗺️ Piano
 
 **Come lavoriamo ora:** io NON testo le versioni intermedie. Tu sviluppi e provi tutto quello che puoi (test automatici in un browser simulato) e io provo solo la versione finale con tutte le funzioni sul mio telefono Android. Ho solo un telefono Android, nessun computer.
 
+**Aggiornamenti all'utente:** non serve avvisarlo a ogni operazione; basta un riepilogo alla fine del lavoro, o subito se qualcosa va storto.
+
 ## L'app
 
 «Note» v2.11.1: app personale per note, liste, promemoria, note vocali, strumenti. JavaScript semplice (nessun framework, nessun bundler), PWA + Android tramite Capacitor 7 (`appId it.francesco.lemienote` — NON cambiarlo mai: l'app si aggiornerebbe come app diversa e i dati non si vedrebbero più). Dati in IndexedDB (`mie-note`, versione 2, archivi `notes`, `meta`, `docs`). Funziona offline. **I miei dati devono restare solo sul mio telefono**: nessun invio in rete, nessuna CDN a runtime, tutte le librerie sono dentro l'app.
